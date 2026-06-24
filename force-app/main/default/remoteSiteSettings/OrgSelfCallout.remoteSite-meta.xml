@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Allows the DynamicPicklistManagerAPI class to call back into this org's
+  Tooling API to read existing picklist/record-type metadata before deploying.
+
+  IMPORTANT: Replace the <url> below with your actual My Domain URL
+  (e.g. https://mycompany.my.salesforce.com) before deploying.
+  The class resolves the URL at runtime via System.URL.getOrgDomainUrl(),
+  so this entry just needs to match that domain.
+-->
+<RemoteSiteSetting xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Allows Apex self-callout to Tooling API for DynamicPicklistManagerAPI</description>
+    <disableProtocolSecurity>false</disableProtocolSecurity>
+    <isActive>true</isActive>
+    <url>https://YOUR_ORG_MYDOMAIN.my.salesforce.com</url>
+</RemoteSiteSetting>
