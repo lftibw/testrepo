@@ -1,113 +1,92 @@
 /**
  * Unit tests for DynamicPicklistManagerAPI.
  *
- * Because Metadata.Operations.enqueueDeployment() and HTTP callouts cannot
- * run together in a test, the tests verify:
- *   (a) input validation errors surface cleanly
- *   (b) the GET status endpoint handles missing/bad params gracefully
- *   (c) a mock HTTP callout returns expected JSON structure
+ * The class talks to the Tooling API via HTTP callouts, so all paths are exercised
+ * through HttpCalloutMock. The mock answers the two GET queries (CustomField,
+ * RecordType) and the PATCH writes (204 No Content).
  */
 @IsTest
 private class DynamicPicklistManagerAPITest {
 
-    // ── Mock for Tooling API callout ─────────────────────────────────────────
+    // ── Mock ─────────────────────────────────────────────────────────────────
 
-    private class ToolingApiMock implements HttpCalloutMock {
-        private String objectName;
-        private String fieldName;
-        private String recordTypeDevName;
+    private class ToolingMock implements HttpCalloutMock {
+        Integer patchStatus;        // status to return on PATCH (204 = success)
+        Boolean fieldHasDependency; // include controllingField/valueSettings in CustomField
 
-        ToolingApiMock(String objectName, String fieldName, String recordTypeDevName) {
-            this.objectName        = objectName;
-            this.fieldName         = fieldName;
-            this.recordTypeDevName = recordTypeDevName;
+        ToolingMock(Integer patchStatus, Boolean fieldHasDependency) {
+            this.patchStatus        = patchStatus;
+            this.fieldHasDependency = fieldHasDependency;
         }
 
         public HttpResponse respond(HttpRequest req) {
             HttpResponse resp = new HttpResponse();
-            resp.setStatusCode(200);
             resp.setHeader('Content-Type', 'application/json');
 
-            if (req.getEndpoint().contains('CustomField')) {
-                resp.setBody(buildCustomFieldBody());
-            } else if (req.getEndpoint().contains('RecordType')) {
-                resp.setBody(buildRecordTypeBody());
+            if (req.getMethod() == 'GET' && req.getEndpoint().contains('CustomField')) {
+                resp.setStatusCode(200);
+                resp.setBody(customFieldQueryBody());
+            } else if (req.getMethod() == 'GET' && req.getEndpoint().contains('RecordType')) {
+                resp.setStatusCode(200);
+                resp.setBody(recordTypeQueryBody());
+            } else if (req.getMethod() == 'PATCH') {
+                resp.setStatusCode(patchStatus);
+                resp.setBody(patchStatus == 204 ? '' : '[{"message":"deploy error","errorCode":"X"}]');
             } else {
                 resp.setStatusCode(400);
-                resp.setBody('{"message":"Unknown tooling type"}');
+                resp.setBody('{"error":"unexpected request"}');
             }
             return resp;
         }
 
-        private String buildCustomFieldBody() {
+        private String customFieldQueryBody() {
+            Map<String, Object> valueSet = new Map<String, Object>{
+                'restricted' => true,
+                'valueSetDefinition' => new Map<String, Object>{
+                    'sorted' => false,
+                    'value'  => new List<Object>{
+                        new Map<String, Object>{ 'fullName' => 'Print', 'label' => 'Print', 'default' => false, 'isActive' => true },
+                        new Map<String, Object>{ 'fullName' => 'TV',    'label' => 'TV',    'default' => false, 'isActive' => true }
+                    }
+                }
+            };
+            if (fieldHasDependency) {
+                valueSet.put('controllingField', 'STO__c');
+                valueSet.put('valueSettings', new List<Object>{
+                    new Map<String, Object>{ 'valueName' => 'Print', 'controllingFieldValue' => new List<String>{ 'Traditional' } },
+                    new Map<String, Object>{ 'valueName' => 'TV',    'controllingFieldValue' => new List<String>{ 'Broadcast' } }
+                });
+            }
             return JSON.serialize(new Map<String, Object>{
                 'totalSize' => 1,
                 'records'   => new List<Object>{
                     new Map<String, Object>{
-                        'Id'       => '00N000000000001',
+                        'Id'       => '00N0000000000001',
                         'Metadata' => new Map<String, Object>{
-                            'label'       => 'MS Marketing Category',
-                            'type'        => 'Picklist',
-                            'description' => null,
-                            'valueSet'    => new Map<String, Object>{
-                                'restricted'      => true,
-                                'controllingField' => 'STO__c',
-                                'valueSetDefinition' => new Map<String, Object>{
-                                    'sorted' => false,
-                                    'value'  => new List<Object>{
-                                        new Map<String, Object>{
-                                            'fullName' => 'Print',
-                                            'label'    => 'Print',
-                                            'default'  => false,
-                                            'isActive' => true
-                                        },
-                                        new Map<String, Object>{
-                                            'fullName' => 'TV',
-                                            'label'    => 'TV',
-                                            'default'  => false,
-                                            'isActive' => true
-                                        }
-                                    }
-                                },
-                                'valueSettings' => new List<Object>{
-                                    new Map<String, Object>{
-                                        'valueName'             => 'Print',
-                                        'controllingFieldValue' => new List<String>{'Traditional'}
-                                    },
-                                    new Map<String, Object>{
-                                        'valueName'             => 'TV',
-                                        'controllingFieldValue' => new List<String>{'Broadcast'}
-                                    }
-                                }
-                            }
+                            'label'    => 'MS Marketing Category',
+                            'type'     => 'Picklist',
+                            'valueSet' => valueSet
                         }
                     }
                 }
             });
         }
 
-        private String buildRecordTypeBody() {
+        private String recordTypeQueryBody() {
             return JSON.serialize(new Map<String, Object>{
                 'totalSize' => 1,
                 'records'   => new List<Object>{
                     new Map<String, Object>{
-                        'Id'       => '012000000000001',
+                        'Id'       => '0120000000000001',
                         'Metadata' => new Map<String, Object>{
-                            'label'          => 'Media Sales',
-                            'active'         => true,
-                            'description'    => null,
+                            'label'  => 'Media Sales',
+                            'active' => true,
                             'picklistValues' => new List<Object>{
                                 new Map<String, Object>{
-                                    'picklist' => fieldName,
+                                    'picklist' => 'MSMarketingCategory__c',
                                     'values'   => new List<Object>{
-                                        new Map<String, Object>{
-                                            'fullName' => 'Print',
-                                            'default'  => false
-                                        },
-                                        new Map<String, Object>{
-                                            'fullName' => 'TV',
-                                            'default'  => false
-                                        }
+                                        new Map<String, Object>{ 'fullName' => 'Print', 'default' => false },
+                                        new Map<String, Object>{ 'fullName' => 'TV',    'default' => false }
                                     }
                                 }
                             }
@@ -118,99 +97,19 @@ private class DynamicPicklistManagerAPITest {
         }
     }
 
-    // ── Helper to set up REST context ────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static void setupPost(String bodyJson) {
-        RestRequest req   = new RestRequest();
-        RestResponse resp = new RestResponse();
-        req.requestURI    = '/services/apexrest/picklist-manager/v1/';
-        req.httpMethod    = 'POST';
-        req.requestBody   = Blob.valueOf(bodyJson);
+        RestRequest req = new RestRequest();
+        req.requestURI  = '/services/apexrest/picklist-manager/v1/';
+        req.httpMethod  = 'POST';
+        req.requestBody = Blob.valueOf(bodyJson);
         RestContext.request  = req;
-        RestContext.response = resp;
+        RestContext.response = new RestResponse();
     }
 
-    private static void setupGet(String deploymentId) {
-        RestRequest req   = new RestRequest();
-        RestResponse resp = new RestResponse();
-        req.requestURI    = '/services/apexrest/picklist-manager/v1/';
-        req.httpMethod    = 'GET';
-        req.params        = new Map<String, String>{ 'deploymentId' => deploymentId };
-        RestContext.request  = req;
-        RestContext.response = resp;
-    }
-
-    // ── Validation tests (no callout needed) ─────────────────────────────────
-
-    @IsTest
-    static void post_missingObjectApiName_returnsFalse() {
-        setupPost('{"fieldApiName":"MSMarketingCategory__c","picklistValue":"Digital_Media"}');
-        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
-        System.assertEquals(false, resp.success,  'Should fail validation');
-        System.assert(resp.message.contains('objectApiName'), 'Error should mention objectApiName');
-    }
-
-    @IsTest
-    static void post_missingFieldApiName_returnsFalse() {
-        setupPost('{"objectApiName":"Account","picklistValue":"Digital_Media"}');
-        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
-        System.assertEquals(false, resp.success);
-        System.assert(resp.message.contains('fieldApiName'));
-    }
-
-    @IsTest
-    static void post_missingPicklistValue_returnsFalse() {
-        setupPost('{"objectApiName":"Account","fieldApiName":"MSMarketingCategory__c"}');
-        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
-        System.assertEquals(false, resp.success);
-        System.assert(resp.message.contains('picklistValue'));
-    }
-
-    @IsTest
-    static void post_dependencyMissingControllingValues_returnsFalse() {
-        String body = JSON.serialize(new Map<String, Object>{
-            'objectApiName'    => 'Account',
-            'fieldApiName'     => 'MSMarketingCategory__c',
-            'picklistValue'    => 'Digital_Media',
-            'dependency'       => new Map<String, Object>{
-                'controllingFieldApiName' => 'STO__c',
-                'controllingValues'       => new List<String>()
-            }
-        });
-        setupPost(body);
-        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
-        System.assertEquals(false, resp.success);
-        System.assert(resp.message.contains('controllingValues'));
-    }
-
-    // ── GET status: missing param ─────────────────────────────────────────────
-
-    @IsTest
-    static void get_missingDeploymentId_returnsFalse() {
-        RestRequest req   = new RestRequest();
-        RestResponse resp = new RestResponse();
-        req.requestURI    = '/services/apexrest/picklist-manager/v1/';
-        req.httpMethod    = 'GET';
-        req.params        = new Map<String, String>();
-        RestContext.request  = req;
-        RestContext.response = resp;
-
-        DynamicPicklistManagerAPI.ApiResponse apiResp = DynamicPicklistManagerAPI.checkDeploymentStatus();
-        System.assertEquals(false, apiResp.success);
-        System.assert(apiResp.message.contains('deploymentId'));
-    }
-
-    // ── Full happy-path with mock callout ────────────────────────────────────
-
-    @IsTest
-    static void post_validRequest_withDependency_enqueuedSuccessfully() {
-        // The mock responds to both CustomField and RecordType Tooling API queries.
-        // The actual Metadata.Operations.enqueueDeployment() is a no-op in tests
-        // (Salesforce stubs it and returns a fake async Id).
-        Test.setMock(HttpCalloutMock.class,
-            new ToolingApiMock('Account', 'MSMarketingCategory__c', 'Media_Sales'));
-
-        String body = JSON.serialize(new Map<String, Object>{
+    private static String fullRequest() {
+        return JSON.serialize(new Map<String, Object>{
             'objectApiName'     => 'Account',
             'fieldApiName'      => 'MSMarketingCategory__c',
             'recordTypeDevName' => 'Media_Sales',
@@ -222,35 +121,111 @@ private class DynamicPicklistManagerAPITest {
                 'controllingValues'       => new List<String>{ 'Online', 'Digital' }
             }
         });
-        setupPost(body);
-
-        Test.startTest();
-        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
-        Test.stopTest();
-
-        System.assertEquals(true,    resp.success, resp.message);
-        System.assertNotEquals(null, resp.deploymentId, 'Should return a deployment Id');
-        System.assertEquals('Pending', resp.status);
     }
 
-    @IsTest
-    static void post_validRequest_withoutRecordType_enqueuedSuccessfully() {
-        Test.setMock(HttpCalloutMock.class,
-            new ToolingApiMock('Account', 'MSMarketingCategory__c', null));
+    // ── Happy paths ──────────────────────────────────────────────────────────
 
-        String body = JSON.serialize(new Map<String, Object>{
-            'objectApiName'  => 'Account',
-            'fieldApiName'   => 'MSMarketingCategory__c',
-            'picklistValue'  => 'Podcast',
-            'picklistLabel'  => 'Podcast',
-            'isDefault'      => false
-        });
-        setupPost(body);
+    @IsTest
+    static void fullRequest_withDependencyAndRecordType_succeeds() {
+        Test.setMock(HttpCalloutMock.class, new ToolingMock(204, true));
+        setupPost(fullRequest());
 
         Test.startTest();
         DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
         Test.stopTest();
 
         System.assertEquals(true, resp.success, resp.message);
+        System.assertEquals('Succeeded', resp.status);
+    }
+
+    @IsTest
+    static void request_withoutDependency_setsControllingFieldFresh() {
+        // Field starts with no dependency; request adds one → controllingField gets set.
+        Test.setMock(HttpCalloutMock.class, new ToolingMock(204, false));
+        setupPost(fullRequest());
+
+        Test.startTest();
+        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
+        Test.stopTest();
+
+        System.assertEquals(true, resp.success, resp.message);
+    }
+
+    @IsTest
+    static void request_withoutRecordType_skipsRecordTypePatch() {
+        Test.setMock(HttpCalloutMock.class, new ToolingMock(204, true));
+        setupPost(JSON.serialize(new Map<String, Object>{
+            'objectApiName' => 'Account',
+            'fieldApiName'  => 'MSMarketingCategory__c',
+            'picklistValue' => 'Podcast',
+            'picklistLabel' => 'Podcast'
+        }));
+
+        Test.startTest();
+        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
+        Test.stopTest();
+
+        System.assertEquals(true, resp.success, resp.message);
+    }
+
+    // ── Failure paths ────────────────────────────────────────────────────────
+
+    @IsTest
+    static void patchFailure_surfacesError() {
+        Test.setMock(HttpCalloutMock.class, new ToolingMock(400, true));
+        setupPost(fullRequest());
+
+        Test.startTest();
+        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
+        Test.stopTest();
+
+        System.assertEquals(false, resp.success);
+        System.assertEquals('Failed', resp.status);
+        System.assert(!resp.errorDetail.isEmpty(), 'Should capture error detail');
+    }
+
+    @IsTest
+    static void duplicateValue_isRejected() {
+        Test.setMock(HttpCalloutMock.class, new ToolingMock(204, true));
+        // 'TV' already exists in the mock value set.
+        setupPost(JSON.serialize(new Map<String, Object>{
+            'objectApiName' => 'Account',
+            'fieldApiName'  => 'MSMarketingCategory__c',
+            'picklistValue' => 'TV'
+        }));
+
+        Test.startTest();
+        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
+        Test.stopTest();
+
+        System.assertEquals(false, resp.success);
+        System.assert(resp.message.contains('already exists'), resp.message);
+    }
+
+    // ── Validation (no callout) ──────────────────────────────────────────────
+
+    @IsTest
+    static void missingRequiredFields_failValidation() {
+        setupPost('{"objectApiName":"Account"}');
+        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
+        System.assertEquals(false, resp.success);
+        System.assert(resp.message.contains('fieldApiName'), resp.message);
+        System.assert(resp.message.contains('picklistValue'), resp.message);
+    }
+
+    @IsTest
+    static void dependencyWithoutControllingValues_failsValidation() {
+        setupPost(JSON.serialize(new Map<String, Object>{
+            'objectApiName' => 'Account',
+            'fieldApiName'  => 'MSMarketingCategory__c',
+            'picklistValue' => 'Digital_Media',
+            'dependency'    => new Map<String, Object>{
+                'controllingFieldApiName' => 'STO__c',
+                'controllingValues'       => new List<String>()
+            }
+        }));
+        DynamicPicklistManagerAPI.ApiResponse resp = DynamicPicklistManagerAPI.addPicklistValue();
+        System.assertEquals(false, resp.success);
+        System.assert(resp.message.contains('controllingValues'), resp.message);
     }
 }
