@@ -232,7 +232,6 @@ global with sharing class DynamicPicklistManagerAPI {
      * existing value and dependency setting. Adds a valueSettings entry when a
      * dependency is supplied.
      */
-    @SuppressWarnings('PMD.ApexDoc')
     private static void addValueToCustomField(Map<String, Object> cfMeta, AddPicklistRequest req) {
         Map<String, Object> vs = (Map<String, Object>) cfMeta.get('valueSet');
         if (vs == null) {
