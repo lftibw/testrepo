@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HomeLink — SmartThings + Wipro → HomeKit</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c1e21; --muted: #65707d;
+    --accent: #0a84ff; --ok: #30a46c; --err: #d92d20; --border: #e3e6ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101214; --card: #1a1d21; --text: #e8eaed; --muted: #98a1ab;
+      --accent: #409cff; --ok: #3dd68c; --err: #ff6b5e; --border: #2a2f35;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header { padding: 28px 20px 8px; max-width: 980px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 26px; }
+  header p { color: var(--muted); margin: 6px 0 0; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px 20px 60px; display: grid; gap: 16px; }
+  .row { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 20px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .card .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--ok); }
+  .dot.err { background: var(--err); }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 10px 0 4px; }
+  input, select {
+    width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  button {
+    margin-top: 12px; padding: 9px 16px; border: 0; border-radius: 9px; cursor: pointer;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+  }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { font-size: 13px; margin-top: 10px; }
+  .msg.ok { color: var(--ok); }
+  .msg.err { color: var(--err); }
+  .qr-wrap { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .qr-wrap img { border-radius: 10px; background: #fff; padding: 6px; }
+  .pin { font-size: 24px; font-weight: 700; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+  details { margin-top: 12px; font-size: 13px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--accent); }
+  details ol { padding-left: 18px; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .chip {
+    display: inline-block; font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--muted); margin-right: 4px;
+  }
+  .badge { font-size: 12px; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
+  .badge.st { background: rgba(10,132,255,.12); color: var(--accent); }
+  .badge.tuya { background: rgba(48,164,108,.12); color: var(--ok); }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .toolbar button { margin-top: 0; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+  a { color: var(--accent); }
+  .switch { position: relative; width: 40px; height: 22px; display: inline-block; }
+  .switch input { display: none; }
+  .switch span {
+    position: absolute; inset: 0; border-radius: 999px; background: var(--border); transition: .15s;
+  }
+  .switch span::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; transition: .15s;
+  }
+  .switch input:checked + span { background: var(--ok); }
+  .switch input:checked + span::after { left: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏠 HomeLink</h1>
+  <p>One bridge that brings your <strong>SmartThings</strong> and <strong>Wipro smart</strong> devices into Apple HomeKit — natively.</p>
+</header>
+<main>
+  <div class="card" id="homekit-card">
+    <h2>Apple HomeKit pairing</h2>
+    <p class="sub">Open the Home app on your iPhone/iPad → <em>Add Accessory</em> → scan this code (or enter the PIN via “More options”). Pair once — every connected device appears automatically.</p>
+    <div class="qr-wrap">
+      <img id="qr" alt="HomeKit pairing QR code" width="200" height="200" hidden>
+      <div>
+        <div style="color:var(--muted);font-size:13px">Setup PIN</div>
+        <div class="pin" id="pin">•••-••-•••</div>
+        <div class="msg" id="paired-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card" id="st-card">
+      <h2><span class="dot" id="st-dot"></span> SmartThings</h2>
+      <p class="sub">Samsung SmartThings account — lights, switches and plugs.</p>
+      <div id="st-form">
+        <label for="st-token">Personal Access Token</label>
+        <input id="st-token" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+        <button id="st-connect">Connect SmartThings</button>
+        <details>
+          <summary>How do I get a token?</summary>
+          <ol>
+            <li>Go to <a href="https://account.smartthings.com/tokens" target="_blank" rel="noopener">account.smartthings.com/tokens</a> and sign in with your Samsung account.</li>
+            <li>Click <em>Generate new token</em>, name it “HomeLink”.</li>
+            <li>Check the <strong>Devices</strong> scopes (list, see, control).</li>
+            <li>Copy the token and paste it above. <em>Note: tokens created after Dec 2024 expire in 24h — reconnect here to refresh, or use a long-lived token/OAuth for production.</em></li>
+          </ol>
+        </details>
+      </div>
+      <div id="st-connected" hidden>
+        <p class="msg ok" id="st-summary"></p>
+        <button class="secondary" id="st-disconnect">Disconnect</button>
+      </div>
+      <div class="msg" id="st-msg"></div>
+    </div>
+
+    <div class="card" id="tuya-card">
+      <h2><span class="dot" id="tuya-dot"></span> Wipro / Tuya</h2>
+      <p class="sub">Wipro Next Smart Home & Smart Life devices (Tuya cloud).</p>
+      <div id="tuya-form">
+        <label for="tuya-id">Access ID / Client ID</label>
+        <input id="tuya-id" placeholder="From your Tuya IoT cloud project" autocomplete="off">
+        <label for="tuya-secret">Access Secret</label>
+        <input id="tuya-secret" type="password" autocomplete="off">
+        <label for="tuya-region">Data center</label>
+        <select id="tuya-region">
+          <option value="in" selected>India (Wipro default)</option>
+          <option value="us">Western America</option>
+          <option value="eu">Central Europe</option>
+          <option value="cn">China</option>
+          <option value="sg">Singapore</option>
+        </select>
+        <button id="tuya-connect">Connect Wipro / Tuya</button>
+        <details>
+          <summary>How do I link my Wipro account?</summary>
+          <ol>
+            <li>Create a free account at <a href="https://iot.tuya.com" target="_blank" rel="noopener">iot.tuya.com</a> → <em>Cloud</em> → <em>Create Cloud Project</em> (pick your data center — <strong>India</strong> for Wipro).</li>
+            <li>In the project, subscribe to the trial of <em>IoT Core</em> and <em>Authorization Token Management</em> APIs.</li>
+            <li>Open <em>Devices → Link App Account → Add App Account</em> and scan the QR with the <strong>Wipro Next Smart Home</strong> (or Smart Life) app: <em>Me → ⚙ / scanner icon</em>.</li>
+            <li>Copy the project’s <strong>Access ID</strong> and <strong>Access Secret</strong> (Overview tab) here.</li>
+          </ol>
+        </details>
+      </div>
+      <div id="tuya-connected" hidden>
+        <p class="msg ok" id="tuya-summary"></p>
+        <button class="secondary" id="tuya-disconnect">Disconnect</button>
+      </div>
+      <div class="msg" id="tuya-msg"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <h2 style="margin:0">Devices</h2>
+      <button class="secondary" id="refresh">↻ Refresh devices</button>
+    </div>
+    <p class="sub">Everything below is exposed to Apple Home. Toggle a device off to hide it from HomeKit.</p>
+    <div id="devices"></div>
+  </div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
