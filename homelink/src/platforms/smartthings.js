@@ -39,7 +39,10 @@ export class SmartThingsPlatform {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`SmartThings API ${res.status} on ${path}: ${body.slice(0, 300)}`);
+      const hint = res.status === 401
+        ? ' — the token is invalid or expired (SmartThings PATs last 24h); generate a new one at account.smartthings.com/tokens and reconnect'
+        : '';
+      throw new Error(`SmartThings API ${res.status} on ${path}: ${body.slice(0, 300)}${hint}`);
     }
     return res.json();
   }

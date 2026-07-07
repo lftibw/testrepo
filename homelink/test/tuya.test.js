@@ -65,6 +65,51 @@ test('TuyaPlatform maps Wipro bulb state to normalized values', async (t) => {
   assert.equal(state.colorTempK, 6500);
 });
 
+test('TuyaPlatform falls back to v2 endpoints when legacy list returns server error', async (t) => {
+  const platform = new TuyaPlatform({ accessId: 'id', accessSecret: 'sec', region: 'eu' });
+  t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
+    const u = new URL(url);
+    const key = `${(options.method || 'GET').toUpperCase()} ${u.pathname}`;
+    if (key === 'GET /v1.0/token') {
+      return { ok: true, json: async () => ({ success: true, result: TOKEN_RESULT }) };
+    }
+    if (key === 'GET /v1.0/iot-01/associated-users/devices') {
+      // what new platform.tuya.com projects return on the legacy endpoint
+      return { ok: true, json: async () => ({ success: false, code: 500, msg: 'server error' }) };
+    }
+    if (key === 'GET /v2.0/cloud/thing/device') {
+      return { ok: true, json: async () => ({ success: true, result: [
+        { id: 'w1', custom_name: 'Bedroom Light', product_name: 'Wipro 9W', category: 'dj', is_online: true },
+      ] }) };
+    }
+    if (key === 'GET /v1.0/devices/w1/status') {
+      return { ok: true, json: async () => ({ success: true, result: [
+        { code: 'switch_led', value: true },
+        { code: 'bright_value_v2', value: 1000 },
+      ] }) };
+    }
+    if (key === 'GET /v1.0/devices/w1/specifications') {
+      return { ok: true, json: async () => ({ success: false, code: 500, msg: 'server error' }) };
+    }
+    throw new Error(`unmocked request: ${key}`);
+  });
+
+  const devices = await platform.listDevices();
+  assert.equal(devices.length, 1);
+  assert.equal(devices[0].name, 'Bedroom Light');
+  assert.equal(devices[0].type, 'light');
+  assert.equal(devices[0].features.brightness, true);
+});
+
+test('Tuya errors carry actionable hints', async (t) => {
+  const platform = new TuyaPlatform({ accessId: 'id', accessSecret: 'bad', region: 'eu' });
+  t.mock.method(globalThis, 'fetch', async () => ({
+    ok: true,
+    json: async () => ({ success: false, code: 1004, msg: 'sign invalid' }),
+  }));
+  await assert.rejects(() => platform.testConnection(), /Access Secret is wrong/);
+});
+
 test('TuyaPlatform sends scaled commands', async (t) => {
   const platform = new TuyaPlatform({ accessId: 'id', accessSecret: 'sec', region: 'in' });
   let sentBody = null;

@@ -37,6 +37,19 @@ export function tuyaSign({ clientId, secret, accessToken = '', t, nonce = '', me
   return { sign, url };
 }
 
+/** Translates Tuya's cryptic error codes into fixes the user can act on. */
+const TUYA_ERROR_HINTS = {
+  500: 'Tuya-side server error; this usually means the endpoint is not supported by your project type — HomeLink retries newer endpoints automatically, so if you still see this, check that "IoT Core" is authorized for the project (Tuya console → project → Service API / Authorization)',
+  1004: 'signature invalid — the Access Secret is wrong (re-copy it from the project overview, no spaces)',
+  1005: 'the Access ID (client id) is wrong — re-copy it from the project overview',
+  1010: 'token expired — just retry',
+  1106: 'permission denied — these credentials usually belong to a DIFFERENT data center; switch the region in HomeLink (Wipro accounts are usually Central Europe) so it matches the project data center',
+  1109: 'invalid parameter for this project type',
+  2406: 'no app account linked in this data center — link your Wipro app account under Devices → Link App Account with the SAME data center selected',
+  28841002: 'the IoT Core trial for this project has expired — renew/resubscribe it in the Tuya console',
+  28841101: 'the project is not authorized for this API — in the Tuya console subscribe "IoT Core" and "Authorization Token Management" and add them to the project',
+};
+
 export class TuyaPlatform {
   name = 'tuya';
   label = 'Wipro / Tuya';
@@ -47,6 +60,7 @@ export class TuyaPlatform {
     this.baseUrl = TUYA_REGIONS[region] ?? TUYA_REGIONS.eu;
     this.tokenInfo = null; // { accessToken, refreshToken, expiresAt, uid }
     this.specCache = new Map(); // deviceId -> parsed function specs
+    this.variantCache = new Map(); // operation -> index of the endpoint variant this project supports
   }
 
   async #rawRequest(method, path, { query = {}, body = null, useToken = true } = {}) {
@@ -82,9 +96,37 @@ export class TuyaPlatform {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
-      throw new Error(`Tuya API error on ${path}: ${data.code ?? res.status} ${data.msg ?? ''}`);
+      const code = data.code ?? res.status;
+      const hint = TUYA_ERROR_HINTS[code] ? ` — ${TUYA_ERROR_HINTS[code]}` : '';
+      const err = new Error(`Tuya API error on ${path}: ${code} ${data.msg ?? ''}${hint}`);
+      err.tuyaCode = code;
+      throw err;
     }
     return data.result;
+  }
+
+  /**
+   * Tries request variants in order (legacy project APIs first, then the
+   * endpoints new platform.tuya.com projects support), remembering which one
+   * this project accepts so later calls go straight there.
+   */
+  async #tryVariants(cacheKey, variants) {
+    const known = this.variantCache.get(cacheKey) ?? 0;
+    const order = [...variants.keys()].sort((a, b) => (a === known ? -1 : b === known ? 1 : a - b));
+    let lastErr;
+    for (const i of order) {
+      try {
+        const result = await variants[i].run();
+        this.variantCache.set(cacheKey, i);
+        return result;
+      } catch (err) {
+        lastErr = err;
+        if (order.length > 1) {
+          console.warn(`[homelink] Tuya ${cacheKey} via ${variants[i].name} failed (${err.message})`);
+        }
+      }
+    }
+    throw lastErr;
   }
 
   async #token() {
@@ -111,6 +153,20 @@ export class TuyaPlatform {
   }
 
   async listDevices() {
+    const devices = await this.#tryVariants('listDevices', [
+      { name: 'iot-01 associated-users', run: () => this.#listLegacy() },
+      { name: 'v2.0 cloud/thing', run: () => this.#listV2() },
+    ]);
+    const normalized = [];
+    for (const d of devices) {
+      const n = await this.#normalize(d);
+      if (n) normalized.push(n);
+    }
+    return normalized;
+  }
+
+  /** Device list for classic iot.tuya.com "Smart Home" projects. */
+  async #listLegacy() {
     const devices = [];
     let lastRowKey = '';
     while (true) {
@@ -121,12 +177,58 @@ export class TuyaPlatform {
       if (!result.has_more || !result.last_row_key) break;
       lastRowKey = result.last_row_key;
     }
-    const normalized = [];
-    for (const d of devices) {
-      const n = await this.#normalize(d);
-      if (n) normalized.push(n);
+    return devices;
+  }
+
+  /**
+   * Device list for projects on the new developer platform
+   * (platform.tuya.com), where the iot-01 endpoint returns "server error".
+   * Status is not included in the listing, so it's fetched per device.
+   */
+  async #listV2() {
+    const devices = [];
+    let lastId = '';
+    while (true) {
+      const query = { page_size: '100' };
+      if (lastId) query.last_id = lastId;
+      const result = await this.#rawRequest('GET', '/v2.0/cloud/thing/device', { query });
+      const page = Array.isArray(result) ? result : result?.list ?? [];
+      for (const d of page) {
+        devices.push({
+          id: d.id,
+          name: d.custom_name || d.customName || d.name || d.product_name || d.productName,
+          product_name: d.product_name || d.productName,
+          category: d.category,
+          online: (d.is_online ?? d.isOnline) !== false,
+          status: null, // filled from the status endpoint in #normalize
+        });
+      }
+      if (page.length < 100) break;
+      lastId = page[page.length - 1].id;
     }
-    return normalized;
+    for (const d of devices) {
+      try {
+        d.status = await this.#status(d.id);
+      } catch {
+        d.status = [];
+      }
+    }
+    return devices;
+  }
+
+  /** Raw data-point list [{code, value}] with fallbacks across project types. */
+  async #status(deviceId) {
+    return this.#tryVariants('status', [
+      { name: 'v1.0 status', run: () => this.#rawRequest('GET', `/v1.0/devices/${deviceId}/status`) },
+      { name: 'iot-03 status', run: () => this.#rawRequest('GET', `/v1.0/iot-03/devices/${deviceId}/status`) },
+      {
+        name: 'v2.0 shadow properties',
+        run: async () => {
+          const result = await this.#rawRequest('GET', `/v2.0/cloud/thing/${deviceId}/shadow/properties`);
+          return (result?.properties ?? []).map((p) => ({ code: p.code, value: p.value }));
+        },
+      },
+    ]);
   }
 
   /**
@@ -208,7 +310,7 @@ export class TuyaPlatform {
 
   // Tuya reports state per data point; we keep the mapping info on the device.
   async getState(deviceId, device) {
-    const status = await this.#rawRequest('GET', `/v1.0/devices/${deviceId}/status`);
+    const status = await this.#status(deviceId);
     const dp = Object.fromEntries(status.map((s) => [s.code, s.value]));
     const m = device._tuya;
     const state = {};
@@ -268,9 +370,22 @@ export class TuyaPlatform {
       }
     }
     if (!commands.length) return;
-    await this.#rawRequest('POST', `/v1.0/devices/${deviceId}/commands`, {
-      body: { commands },
-    });
+    await this.#tryVariants('commands', [
+      {
+        name: 'v1.0 commands',
+        run: () => this.#rawRequest('POST', `/v1.0/devices/${deviceId}/commands`, { body: { commands } }),
+      },
+      {
+        name: 'iot-03 commands',
+        run: () => this.#rawRequest('POST', `/v1.0/iot-03/devices/${deviceId}/commands`, { body: { commands } }),
+      },
+      {
+        name: 'v2.0 shadow properties issue',
+        run: () => this.#rawRequest('POST', `/v2.0/cloud/thing/${deviceId}/shadow/properties/issue`, {
+          body: { properties: JSON.stringify(Object.fromEntries(commands.map((c) => [c.code, c.value]))) },
+        }),
+      },
+    ]);
   }
 
   #toPercent(value, range) {

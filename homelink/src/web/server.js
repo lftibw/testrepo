@@ -16,7 +16,10 @@ export function createWebServer(app /* HomeLinkApp */) {
   web.use(express.static(path.join(__dirname, 'public')));
 
   const wrap = (fn) => (req, res) =>
-    Promise.resolve(fn(req, res)).catch((err) => res.status(400).json({ error: err.message }));
+    Promise.resolve(fn(req, res)).catch((err) => {
+      console.error(`[homelink] ${req.method} ${req.path} failed:`, err.message);
+      res.status(400).json({ error: err.message });
+    });
 
   web.get('/api/status', wrap(async (req, res) => {
     const status = app.status();
