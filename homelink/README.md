@@ -27,6 +27,24 @@ npm start
 
 Then open **http://localhost:8580** and follow the three cards:
 
+### Run it as a server on a Mac
+
+To keep HomeLink running permanently on a MacBook/Mac mini (start at login, auto-restart on crash):
+
+```bash
+cd homelink
+./scripts/macos-server.sh install     # installs deps + registers a launchd service
+./scripts/macos-server.sh status      # portal URL + HomeKit PIN
+./scripts/macos-server.sh logs        # tail the app log
+```
+
+Notes for Mac servers:
+
+- When macOS asks whether **node** may *accept incoming network connections*, click **Allow** — that's HomeKit traffic from your iPhone/Apple TV.
+- The Mac must be on the **same Wi-Fi/LAN** as your Apple devices, and shouldn't go to full sleep: enable *System Settings → Battery/Energy → Prevent automatic sleeping when the display is off* (or run `sudo pmset -a sleep 0` / `caffeinate`), ideally keeping the MacBook on power.
+- An **Apple TV or HomePod** on the same network automatically becomes a *home hub*, which gives you control when away from home and enables automations — no extra setup in HomeLink needed.
+- The portal is also reachable from your phone at `http://<your-mac-name>.local:8580`.
+
 ### 1. Connect SmartThings
 
 1. Go to [account.smartthings.com/tokens](https://account.smartthings.com/tokens) and sign in with your Samsung account.
