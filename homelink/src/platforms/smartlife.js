@@ -22,7 +22,9 @@ import { buildMapping, dpToState, stateToCommands } from './tuya-dp.js';
 
 const LOGIN_BASE = 'https://apigw.iotbing.com';
 // Client identity used by Home Assistant's official integration
-export const SMARTLIFE_CLIENT_ID = 'HA_3y9q4ak7044ksvc3gv';
+// (homeassistant/components/tuya/const.py — must match or the data API
+// rejects every call with "-9999999 Invalid client;No access")
+export const SMARTLIFE_CLIENT_ID = 'HA_3y9q4ak7g4ephrvke';
 export const SMARTLIFE_SCHEMA = 'haauthorize';
 
 const md5hex = (s) => crypto.createHash('md5').update(s, 'utf8').digest('hex');
