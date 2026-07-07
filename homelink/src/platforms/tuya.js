@@ -5,7 +5,10 @@
  * hood. Control goes through the Tuya IoT OpenAPI: create a (free) cloud
  * project at https://iot.tuya.com, link your Wipro/Smart Life app account to
  * it by scanning a QR code, and use the project's Access ID / Access Secret
- * here. Wipro accounts are usually hosted in the India data center.
+ * here. Note: Wipro Next is an OEM app created before Tuya's 2020-09-22
+ * cutoff, so Indian Wipro accounts are usually homed in the Central Europe
+ * data center (not India) — see
+ * https://developer.tuya.com/en/docs/iot/oem-app-data-center-distributed
  *
  * Implements Tuya's HMAC-SHA256 request signing (sign_version 2.0).
  */
@@ -38,10 +41,10 @@ export class TuyaPlatform {
   name = 'tuya';
   label = 'Wipro / Tuya';
 
-  constructor({ accessId, accessSecret, region = 'in' }) {
+  constructor({ accessId, accessSecret, region = 'eu' }) {
     this.accessId = accessId;
     this.accessSecret = accessSecret;
-    this.baseUrl = TUYA_REGIONS[region] ?? TUYA_REGIONS.in;
+    this.baseUrl = TUYA_REGIONS[region] ?? TUYA_REGIONS.eu;
     this.tokenInfo = null; // { accessToken, refreshToken, expiresAt, uid }
     this.specCache = new Map(); // deviceId -> parsed function specs
   }

@@ -135,9 +135,9 @@
         <input id="tuya-secret" type="password" autocomplete="off">
         <label for="tuya-region">Data center</label>
         <select id="tuya-region">
-          <option value="in" selected>India (Wipro default)</option>
+          <option value="eu" selected>Central Europe (Wipro default — pre-2020 OEM apps map India accounts here)</option>
+          <option value="in">India</option>
           <option value="us">Western America</option>
-          <option value="eu">Central Europe</option>
           <option value="cn">China</option>
           <option value="sg">Singapore</option>
         </select>
@@ -145,7 +145,7 @@
         <details>
           <summary>How do I link my Wipro account?</summary>
           <ol>
-            <li>Create a free account at <a href="https://iot.tuya.com" target="_blank" rel="noopener">iot.tuya.com</a> → <em>Cloud</em> → <em>Create Cloud Project</em> (pick your data center — <strong>India</strong> for Wipro).</li>
+            <li>Create a free account at <a href="https://iot.tuya.com" target="_blank" rel="noopener">iot.tuya.com</a> → <em>Cloud</em> → <em>Create Cloud Project</em>. Pick the data center your app account lives in — for <strong>Wipro Next</strong> that is usually <strong>Central Europe</strong> (the app predates Tuya's Sep 2020 cutoff, so Indian accounts were homed in Frankfurt). If linking fails there, try <strong>India</strong>.</li>
             <li>In the project, subscribe to the trial of <em>IoT Core</em> and <em>Authorization Token Management</em> APIs.</li>
             <li>Open <em>Devices → Link App Account → Add App Account</em> and scan the QR with the <strong>Wipro Next Smart Home</strong> (or Smart Life) app: <em>Me → ⚙ / scanner icon</em>.</li>
             <li>Copy the project’s <strong>Access ID</strong> and <strong>Access Secret</strong> (Overview tab) here.</li>

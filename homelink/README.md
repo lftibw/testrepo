@@ -57,7 +57,7 @@ Notes for Mac servers:
 
 Wipro's "Next Smart Home" app is a rebranded Tuya app, so control goes through Tuya's official OpenAPI:
 
-1. Create a free developer account at [iot.tuya.com](https://iot.tuya.com) → **Cloud → Create Cloud Project**. Pick the data center that matches your app account (**India** for most Wipro users).
+1. Create a free developer account at [iot.tuya.com](https://iot.tuya.com) → **Cloud → Create Cloud Project**. Pick the data center that matches your app account. **For Wipro Next this is usually Central Europe**, not India: Tuya homes Indian accounts of pre-Sep-2020 OEM apps (Wipro Next launched in 2018) in the Central Europe DC ([mapping rules](https://developer.tuya.com/en/docs/iot/oem-app-data-center-distributed?id=Kafi0ku9l07qb)). If QR linking fails against Central Europe, retry with India — the account-to-DC mapping must match or linking fails even after you approve in the app.
 2. In the project, subscribe to the (free trial) **IoT Core** and **Authorization Token Management** services.
 3. Open **Devices → Link App Account → Add App Account**, and scan the QR code with the Wipro Next Smart Home (or Smart Life) app — *Me → scanner icon*. All devices from your app account appear in the project.
 4. Copy the project's **Access ID** and **Access Secret** (Overview tab) into the Wipro/Tuya card and pick your data center.
