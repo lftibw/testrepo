@@ -45,9 +45,20 @@ export function createWebServer(app /* HomeLinkApp */) {
     res.json({ ok: true, deviceCount });
   }));
 
+  web.post('/api/smartlife/qr', wrap(async (req, res) => {
+    const userCode = String(req.body?.userCode ?? '').trim();
+    if (!userCode) throw new Error('Enter your Smart Life user code (app → Me → Settings → Account and Security)');
+    const { qrContent } = await app.startSmartLifeLogin(userCode);
+    res.json({ ok: true, qr: await QRCode.toDataURL(qrContent, { margin: 1, width: 220 }) });
+  }));
+
+  web.post('/api/smartlife/poll', wrap(async (req, res) => {
+    res.json(await app.pollSmartLifeLogin());
+  }));
+
   web.delete('/api/platform/:name', wrap(async (req, res) => {
     const { name } = req.params;
-    if (!['smartthings', 'tuya'].includes(name)) throw new Error('Unknown platform');
+    if (!['smartthings', 'tuya', 'smartlife'].includes(name)) throw new Error('Unknown platform');
     app.disconnectPlatform(name);
     res.json({ ok: true });
   }));

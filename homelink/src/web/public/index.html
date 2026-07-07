@@ -79,6 +79,16 @@
   }
   .switch input:checked + span { background: var(--ok); }
   .switch input:checked + span::after { left: 20px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tab {
+    margin-top: 0; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
+  }
+  .tab.active { color: var(--accent); border-color: var(--accent); background: rgba(10,132,255,.08); }
+  .tab .rec {
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--ok); margin-left: 4px;
+  }
 </style>
 </head>
 <body>
@@ -127,7 +137,39 @@
 
     <div class="card" id="tuya-card">
       <h2><span class="dot" id="tuya-dot"></span> Wipro / Tuya</h2>
-      <p class="sub">Wipro Next Smart Home & Smart Life devices (Tuya cloud).</p>
+      <p class="sub">Wipro smart lights & other Tuya devices.</p>
+
+      <div class="tabs" id="wipro-tabs">
+        <button class="tab active" data-tab="sl">Smart Life app <span class="rec">easy</span></button>
+        <button class="tab" data-tab="dev">Developer project</button>
+      </div>
+
+      <div id="sl-pane">
+        <div id="sl-form">
+          <label for="sl-usercode">Smart Life user code</label>
+          <input id="sl-usercode" placeholder="e.g. 3xy8kq" autocomplete="off">
+          <button id="sl-connect">Get login QR code</button>
+          <div id="sl-qr-wrap" hidden style="text-align:center;margin-top:12px">
+            <img id="sl-qr" alt="Smart Life login QR" width="200" height="200">
+            <p class="sub" style="margin-top:8px">Scan with the <strong>Smart Life</strong> app (<em>Me → ⊕ scanner icon</em>) and approve. Waiting…</p>
+          </div>
+          <details>
+            <summary>How does this work? (no developer account needed)</summary>
+            <ol>
+              <li>Install the <strong>Smart Life</strong> app and add your Wipro bulbs there (they're Tuya devices — flick the light off/on 3× to reset, then <em>Add Device</em>). <em>Note: a bulb lives in one app at a time, so it moves out of Wipro Next.</em></li>
+              <li>In Smart Life: <em>Me → Settings ⚙ → Account and Security → User Code</em> — enter that code above.</li>
+              <li>Tap the button, scan the QR with Smart Life's scanner, approve — done. No Tuya console, no data centers.</li>
+            </ol>
+          </details>
+        </div>
+        <div id="sl-connected" hidden>
+          <p class="msg ok" id="sl-summary"></p>
+          <button class="secondary" id="sl-disconnect">Disconnect</button>
+        </div>
+        <div class="msg" id="sl-msg"></div>
+      </div>
+
+      <div id="dev-pane" hidden>
       <div id="tuya-form">
         <label for="tuya-id">Access ID / Client ID</label>
         <input id="tuya-id" placeholder="From your Tuya IoT cloud project" autocomplete="off">
@@ -157,6 +199,7 @@
         <button class="secondary" id="tuya-disconnect">Disconnect</button>
       </div>
       <div class="msg" id="tuya-msg"></div>
+      </div>
     </div>
   </div>
 

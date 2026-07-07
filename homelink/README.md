@@ -53,14 +53,24 @@ Notes for Mac servers:
 
 > ⚠️ PATs created after Dec 2024 expire after 24 hours. For long-term use, set up a SmartThings OAuth app, or simply paste a fresh token when needed — device pairing with HomeKit is *not* lost when a token expires.
 
-### 2. Connect Wipro (Tuya cloud)
+### 2. Connect Wipro — two ways
 
-Wipro's "Next Smart Home" app is a rebranded Tuya app, so control goes through Tuya's official OpenAPI:
+Wipro's "Next Smart Home" app is a rebranded Tuya app. HomeLink supports both of Tuya's access paths:
+
+#### Method A — Smart Life app login (recommended, no developer account)
+
+This is the same mechanism Home Assistant's official Tuya integration uses (a port of Tuya's [`tuya-device-sharing-sdk`](https://github.com/tuya/tuya-device-sharing-sdk)): you scan a QR with the **Smart Life** app and you're in. No Tuya console, no cloud project, no data-center guessing.
+
+1. Install the **Smart Life** app and pair your Wipro bulbs in it (they're standard Tuya devices: flick the wall switch off/on 3× until the bulb blinks, then *Add Device*). A bulb can live in only one app at a time, so it moves out of Wipro Next — you'll control it from Apple Home anyway.
+2. In Smart Life: **Me → Settings ⚙ → Account and Security → User Code** — enter that code in HomeLink's Wipro card (Smart Life tab).
+3. Tap **Get login QR code**, scan it with Smart Life's scanner (*Me → ⊕/scanner icon*), approve. Done.
+
+#### Method B — Tuya developer project (advanced)
 
 1. Create a free developer account at [iot.tuya.com](https://iot.tuya.com) → **Cloud → Create Cloud Project**. Pick the data center that matches your app account. **For Wipro Next this is usually Central Europe**, not India: Tuya homes Indian accounts of pre-Sep-2020 OEM apps (Wipro Next launched in 2018) in the Central Europe DC ([mapping rules](https://developer.tuya.com/en/docs/iot/oem-app-data-center-distributed?id=Kafi0ku9l07qb)). If QR linking fails against Central Europe, retry with India — the account-to-DC mapping must match or linking fails even after you approve in the app.
 2. In the project, subscribe to the (free trial) **IoT Core** and **Authorization Token Management** services.
 3. Open **Devices → Link App Account → Add App Account**, and scan the QR code with the Wipro Next Smart Home (or Smart Life) app — *Me → scanner icon*. All devices from your app account appear in the project.
-4. Copy the project's **Access ID** and **Access Secret** (Overview tab) into the Wipro/Tuya card and pick your data center.
+4. Copy the project's **Access ID** and **Access Secret** (Overview tab) into the Wipro/Tuya card (Developer project tab) and pick your data center. HomeLink handles both classic (iot.tuya.com) and new (platform.tuya.com) project types automatically.
 
 ### 3. Pair with Apple Home
 
@@ -76,8 +86,21 @@ Open the **Home** app on your iPhone/iPad → **+ → Add Accessory** → scan t
 | SmartThings `switchLevel` / Tuya `bright_value(_v2)` | Brightness |
 | SmartThings `colorTemperature` / Tuya `temp_value(_v2)` | Color Temperature |
 | SmartThings `colorControl` / Tuya `colour_data(_v2)` | Hue + Saturation |
+| SmartThings `airConditionerMode` + `thermostatCoolingSetpoint` + `temperatureMeasurement` | HeaterCooler: power, mode (auto/heat/cool), target temperature, current temperature |
 
-Device types are inferred (light / outlet / switch) from capabilities and categories. Sensors and other read-only devices are not exposed yet (see Roadmap).
+Air conditioners (e.g. Samsung WindFree units in SmartThings) appear as native HomeKit **HeaterCooler** accessories: on/off, mode selection, and temperature setpoint straight from the Home app or Siri ("set the bedroom AC to 24 degrees"). Supported modes and setpoint limits are read from the device; °F units are converted automatically. Tuya `dry`/`wind` modes have no HomeKit equivalent and surface as *Cool*.
+
+Device types are inferred (light / outlet / switch / ac) from capabilities and categories. Sensors and other read-only devices are not exposed yet (see Roadmap).
+
+## Apple TV / Home app checklist
+
+You **pair once from an iPhone or iPad** — the Apple TV cannot scan the pairing QR itself. After that, accessories appear on every device signed into the same iCloud Home, including the Apple TV, automatically:
+
+1. Pair via iPhone Home app → **+ → Add Accessory** → scan HomeLink's QR.
+2. The Apple TV must be **signed into the same Apple ID / iCloud account** (or added as a member of the same Home via invitation) and have **Settings → AirPlay & HomeKit / Users → iCloud → Home** enabled.
+3. If the Apple TV shows a different or empty home, open the Home app on tvOS and check the selected home (long-press the Home icon / top-left home switcher).
+4. The Apple TV then also acts as the **home hub** (visible in the iPhone Home app → ⋯ → Home Settings → Home Hubs & Bridges), enabling remote access and automations.
+5. Nothing shows anywhere? The pairing itself failed: make sure the Mac and iPhone are on the same Wi-Fi (no guest network / AP isolation), macOS Firewall allowed **node** to accept incoming connections, and HomeLink's portal says "Paired with Apple Home".
 
 ## Configuration & data
 

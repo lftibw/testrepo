@@ -39,12 +39,22 @@ async function loadStatus() {
     `Connected — ${status.platforms.smartthings.deviceCount} device(s) found`);
   renderPlatform('tuya', status.platforms.tuya,
     `Connected (${status.platforms.tuya.region.toUpperCase()} region) — ${status.platforms.tuya.deviceCount} device(s) found`);
+
+  const sl = status.platforms.smartlife;
+  $('sl-form').hidden = sl.connected;
+  $('sl-connected').hidden = !sl.connected;
+  if (sl.connected) $('sl-summary').textContent = `Connected via Smart Life — ${sl.deviceCount} device(s) found`;
+  if (sl.error) setMsg('sl-msg', sl.error, false);
+  // one dot for the whole Wipro card: green if either method is connected
+  $('tuya-dot').className = 'dot ' + ((sl.connected || status.platforms.tuya.connected) ? 'on'
+    : (sl.error || status.platforms.tuya.error) ? 'err' : '');
 }
 
 const FEATURE_LABELS = [
   ['brightness', 'dimming'],
   ['colorTemp', 'white temp'],
   ['color', 'color'],
+  ['ac', 'temp + mode'],
 ];
 
 function describeState(d) {
@@ -52,6 +62,11 @@ function describeState(d) {
   if (!d.state.power) return 'Off';
   let s = 'On';
   if (d.features.brightness && d.state.brightness !== undefined) s += ` · ${d.state.brightness}%`;
+  if (d.features.ac) {
+    if (d.state.mode) s += ` · ${d.state.mode}`;
+    if (d.state.targetC !== undefined) s += ` · set ${d.state.targetC.toFixed(1)}°C`;
+    if (d.state.currentC !== undefined) s += ` (now ${d.state.currentC.toFixed(1)}°C)`;
+  }
   return s;
 }
 
@@ -152,6 +167,62 @@ $('st-disconnect').addEventListener('click', async () => {
 $('tuya-disconnect').addEventListener('click', async () => {
   await api('/api/platform/tuya', { method: 'DELETE' });
   setMsg('tuya-msg', '', true);
+  await refreshAll();
+});
+
+// Wipro card method tabs
+document.querySelectorAll('#wipro-tabs .tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('#wipro-tabs .tab').forEach((t) => t.classList.toggle('active', t === tab));
+    $('sl-pane').hidden = tab.dataset.tab !== 'sl';
+    $('dev-pane').hidden = tab.dataset.tab !== 'dev';
+  });
+});
+
+let slPollTimer = null;
+
+$('sl-connect').addEventListener('click', async () => {
+  const btn = $('sl-connect');
+  btn.disabled = true;
+  setMsg('sl-msg', '', true);
+  clearInterval(slPollTimer);
+  try {
+    const { qr } = await api('/api/smartlife/qr', {
+      method: 'POST',
+      body: JSON.stringify({ userCode: $('sl-usercode').value }),
+    });
+    $('sl-qr').src = qr;
+    $('sl-qr-wrap').hidden = false;
+    const startedAt = Date.now();
+    slPollTimer = setInterval(async () => {
+      try {
+        const result = await api('/api/smartlife/poll', { method: 'POST' });
+        if (!result.pending) {
+          clearInterval(slPollTimer);
+          $('sl-qr-wrap').hidden = true;
+          setMsg('sl-msg', `Connected! Found ${result.deviceCount} device(s).`, true);
+          await refreshAll();
+        } else if (Date.now() - startedAt > 3 * 60_000) {
+          clearInterval(slPollTimer);
+          $('sl-qr-wrap').hidden = true;
+          setMsg('sl-msg', 'QR code expired — tap the button for a fresh one.', false);
+        }
+      } catch (err) {
+        clearInterval(slPollTimer);
+        $('sl-qr-wrap').hidden = true;
+        setMsg('sl-msg', err.message, false);
+      }
+    }, 2500);
+  } catch (err) {
+    setMsg('sl-msg', err.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('sl-disconnect').addEventListener('click', async () => {
+  await api('/api/platform/smartlife', { method: 'DELETE' });
+  setMsg('sl-msg', '', true);
   await refreshAll();
 });
 

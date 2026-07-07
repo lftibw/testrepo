@@ -6,13 +6,18 @@
  * or an OAuth2 bearer token.
  *
  * Normalized device shape shared by all platforms:
- *   { id, platform, name, model, online, type: 'light'|'switch'|'outlet',
- *     features: { power, brightness, colorTemp: {minK, maxK}|null, color } }
+ *   { id, platform, name, model, online, type: 'light'|'switch'|'outlet'|'ac',
+ *     features: { power, brightness, colorTemp: {minK, maxK}|null, color,
+ *                 ac: { modes: ['auto','cool',...], minC, maxC, unit }|undefined } }
  *
  * Normalized state shape:
  *   { power: bool, brightness: 0-100, colorTempK: number,
- *     hue: 0-360, saturation: 0-100 }
+ *     hue: 0-360, saturation: 0-100,
+ *     mode: SmartThings AC mode string, currentC: °C, targetC: °C }
  */
+
+const toC = (value, unit) => (unit === 'F' ? (Number(value) - 32) * 5 / 9 : Number(value));
+const fromC = (c, unit) => (unit === 'F' ? Math.round(c * 9 / 5 + 32) : Math.round(c * 2) / 2);
 
 const API_BASE = 'https://api.smartthings.com/v1';
 
@@ -63,7 +68,12 @@ export class SmartThingsPlatform {
       const url = new URL(next);
       page = await this.#request(url.pathname.replace(/^\/v1/, '') + url.search);
     }
-    return devices.map((d) => this.#normalize(d)).filter(Boolean);
+    const normalized = [];
+    for (const d of devices) {
+      const n = await this.#normalize(d);
+      if (n) normalized.push(n);
+    }
+    return normalized;
   }
 
   #capabilities(device) {
@@ -71,9 +81,13 @@ export class SmartThingsPlatform {
     return new Set((main?.capabilities ?? []).map((c) => c.id));
   }
 
-  #normalize(device) {
+  async #normalize(device) {
     const caps = this.#capabilities(device);
     if (!caps.has('switch')) return null; // only actuators for now
+
+    if (caps.has('airConditionerMode') && caps.has('thermostatCoolingSetpoint')) {
+      return this.#normalizeAc(device);
+    }
 
     const category = device.components?.[0]?.categories?.[0]?.name ?? '';
     let type = 'switch';
@@ -99,7 +113,50 @@ export class SmartThingsPlatform {
     };
   }
 
-  async getState(deviceId) {
+  /**
+   * ACs need one status read up front: it tells us the supported modes
+   * (auto/cool/heat/dry/wind), the setpoint limits, and whether the unit
+   * reports °C or °F — all of which shape the HomeKit HeaterCooler service.
+   */
+  async #normalizeAc(device) {
+    let modes = ['auto', 'cool', 'heat'];
+    let unit = 'C';
+    let minC = 16;
+    let maxC = 30;
+    try {
+      const status = await this.#request(`/devices/${device.deviceId}/status`);
+      const main = status.components?.main ?? {};
+      unit = main.temperatureMeasurement?.temperature?.unit ?? 'C';
+      const supported = main.airConditionerMode?.supportedAcModes?.value;
+      if (Array.isArray(supported) && supported.length) modes = supported;
+      const setpointCtl = main['custom.thermostatSetpointControl'];
+      if (setpointCtl?.minimumSetpoint?.value != null) {
+        minC = Math.round(toC(setpointCtl.minimumSetpoint.value, unit));
+      }
+      if (setpointCtl?.maximumSetpoint?.value != null) {
+        maxC = Math.round(toC(setpointCtl.maximumSetpoint.value, unit));
+      }
+    } catch {
+      // fall back to sensible AC defaults if the status read fails
+    }
+    return {
+      id: device.deviceId,
+      platform: this.name,
+      name: device.label || device.name || 'Air Conditioner',
+      model: device.deviceTypeName || device.name || 'SmartThings AC',
+      online: true,
+      type: 'ac',
+      features: {
+        power: true,
+        brightness: false,
+        colorTemp: null,
+        color: false,
+        ac: { modes, minC, maxC, unit },
+      },
+    };
+  }
+
+  async getState(deviceId, device) {
     const status = await this.#request(`/devices/${deviceId}/status`);
     const main = status.components?.main ?? {};
     const state = {};
@@ -113,10 +170,20 @@ export class SmartThingsPlatform {
       state.hue = (Number(main.colorControl.hue.value) || 0) * 3.6;
       state.saturation = Number(main.colorControl.saturation?.value) || 0;
     }
+    if (device?.features?.ac) {
+      const unit = device.features.ac.unit;
+      if (main.airConditionerMode?.airConditionerMode) {
+        state.mode = main.airConditionerMode.airConditionerMode.value;
+      }
+      const current = main.temperatureMeasurement?.temperature;
+      if (current?.value != null) state.currentC = toC(current.value, current.unit ?? unit);
+      const setpoint = main.thermostatCoolingSetpoint?.coolingSetpoint;
+      if (setpoint?.value != null) state.targetC = toC(setpoint.value, setpoint.unit ?? unit);
+    }
     return state;
   }
 
-  async setState(deviceId, changes) {
+  async setState(deviceId, changes, device) {
     const commands = [];
     if (changes.power !== undefined) {
       commands.push({ component: 'main', capability: 'switch', command: changes.power ? 'on' : 'off', arguments: [] });
@@ -137,6 +204,13 @@ export class SmartThingsPlatform {
           saturation: Math.max(0, Math.min(100, changes.saturation ?? 100)),
         }],
       });
+    }
+    if (changes.mode !== undefined) {
+      commands.push({ component: 'main', capability: 'airConditionerMode', command: 'setAirConditionerMode', arguments: [changes.mode] });
+    }
+    if (changes.targetC !== undefined) {
+      const unit = device?.features?.ac?.unit ?? 'C';
+      commands.push({ component: 'main', capability: 'thermostatCoolingSetpoint', command: 'setCoolingSetpoint', arguments: [fromC(changes.targetC, unit)] });
     }
     if (!commands.length) return;
     await this.#request(`/devices/${deviceId}/commands`, {

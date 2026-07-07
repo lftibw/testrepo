@@ -72,6 +72,78 @@ test('getState converts SmartThings 0-100 hue to HomeKit 0-360', async (t) => {
   assert.equal(state.colorTempK, 3000);
 });
 
+const AC_DEVICE = {
+  deviceId: 'st-ac-1',
+  label: 'Bedroom AC',
+  deviceTypeName: 'Samsung Room A/C',
+  components: [{
+    id: 'main',
+    categories: [{ name: 'AirConditioner' }],
+    capabilities: [
+      { id: 'switch' }, { id: 'airConditionerMode' }, { id: 'thermostatCoolingSetpoint' },
+      { id: 'temperatureMeasurement' }, { id: 'airConditionerFanMode' },
+    ],
+  }],
+};
+
+const AC_STATUS = {
+  components: {
+    main: {
+      switch: { switch: { value: 'on' } },
+      airConditionerMode: {
+        airConditionerMode: { value: 'cool' },
+        supportedAcModes: { value: ['auto', 'cool', 'dry', 'wind', 'heat'] },
+      },
+      temperatureMeasurement: { temperature: { value: 27, unit: 'C' } },
+      thermostatCoolingSetpoint: { coolingSetpoint: { value: 24, unit: 'C' } },
+      'custom.thermostatSetpointControl': {
+        minimumSetpoint: { value: 16, unit: 'C' },
+        maximumSetpoint: { value: 30, unit: 'C' },
+      },
+    },
+  },
+};
+
+test('normalizes an AC into type ac with modes and setpoint limits', async (t) => {
+  const platform = new SmartThingsPlatform({ token: 'tok' });
+  t.mock.method(globalThis, 'fetch', mockFetch({
+    'GET /v1/devices': { items: [AC_DEVICE] },
+    'GET /v1/devices/st-ac-1/status': AC_STATUS,
+  }));
+  const [ac] = await platform.listDevices();
+  assert.equal(ac.type, 'ac');
+  assert.deepEqual(ac.features.ac.modes, ['auto', 'cool', 'dry', 'wind', 'heat']);
+  assert.equal(ac.features.ac.minC, 16);
+  assert.equal(ac.features.ac.maxC, 30);
+  assert.equal(ac.features.ac.unit, 'C');
+
+  const state = await platform.getState('st-ac-1', ac);
+  assert.equal(state.power, true);
+  assert.equal(state.mode, 'cool');
+  assert.equal(state.currentC, 27);
+  assert.equal(state.targetC, 24);
+});
+
+test('AC setState sends mode and setpoint commands', async (t) => {
+  const platform = new SmartThingsPlatform({ token: 'tok' });
+  let sentBody = null;
+  t.mock.method(globalThis, 'fetch', mockFetch({
+    'POST /v1/devices/st-ac-1/commands': (u, options) => {
+      sentBody = JSON.parse(options.body);
+      return {};
+    },
+  }));
+  const device = { features: { ac: { modes: ['auto', 'cool', 'heat'], minC: 16, maxC: 30, unit: 'C' } } };
+  await platform.setState('st-ac-1', { mode: 'cool', targetC: 23.5 }, device);
+  assert.deepEqual(sentBody.commands, [
+    { component: 'main', capability: 'airConditionerMode', command: 'setAirConditionerMode', arguments: ['cool'] },
+    { component: 'main', capability: 'thermostatCoolingSetpoint', command: 'setCoolingSetpoint', arguments: [23.5] },
+  ]);
+
+  await platform.setState('st-ac-1', { targetC: 24 }, { features: { ac: { unit: 'F' } } });
+  assert.deepEqual(sentBody.commands[0].arguments, [75]); // 24°C → 75°F
+});
+
 test('setState builds SmartThings command payloads', async (t) => {
   const platform = new SmartThingsPlatform({ token: 'tok' });
   let sentBody = null;

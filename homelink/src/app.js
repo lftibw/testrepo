@@ -6,6 +6,7 @@
 import { saveConfig } from './config.js';
 import { SmartThingsPlatform } from './platforms/smartthings.js';
 import { TuyaPlatform } from './platforms/tuya.js';
+import { SmartLifePlatform, createLoginQr, pollLogin } from './platforms/smartlife.js';
 import { HomeKitBridge } from './bridge.js';
 
 export class HomeLinkApp {
@@ -26,6 +27,11 @@ export class HomeLinkApp {
     if (this.config.tuya?.accessId) {
       await this.connectTuya(this.config.tuya, { save: false }).catch((err) =>
         this.platformErrors.set('tuya', err.message)
+      );
+    }
+    if (this.config.smartlife?.tokenInfo) {
+      await this.attachSmartLife(this.config.smartlife).catch((err) =>
+        this.platformErrors.set('smartlife', err.message)
       );
     }
     await this.bridge.publish();
@@ -60,7 +66,44 @@ export class HomeLinkApp {
     return this.deviceCount('tuya');
   }
 
+  /** Step 1 of Smart Life login: returns the QR content to display. */
+  async startSmartLifeLogin(userCode) {
+    const { token, qrContent } = await createLoginQr(userCode);
+    this.pendingSmartLife = { token, userCode };
+    return { token, qrContent };
+  }
+
+  /** Step 2: called repeatedly by the UI until the app approves the login. */
+  async pollSmartLifeLogin() {
+    if (!this.pendingSmartLife) throw new Error('No Smart Life login in progress');
+    const { token, userCode } = this.pendingSmartLife;
+    const result = await pollLogin(token, userCode);
+    if (result.pending) return { pending: true };
+    this.pendingSmartLife = null;
+    await this.attachSmartLife(result.credentials);
+    this.config.smartlife = result.credentials;
+    saveConfig(this.config);
+    return { pending: false, deviceCount: this.deviceCount('smartlife') };
+  }
+
+  async attachSmartLife(credentials) {
+    const platform = new SmartLifePlatform(credentials, (tokenInfo) => {
+      if (this.config.smartlife) {
+        this.config.smartlife.tokenInfo = tokenInfo;
+        saveConfig(this.config);
+      }
+    });
+    await platform.testConnection();
+    this.platforms.set('smartlife', platform);
+    this.platformErrors.delete('smartlife');
+    await this.refreshDevices();
+  }
+
   disconnectPlatform(name) {
+    if (name === 'smartlife') {
+      this.platforms.get('smartlife')?.logout();
+      this.pendingSmartLife = null;
+    }
     this.platforms.delete(name);
     this.platformErrors.delete(name);
     this.config[name] = null;
@@ -125,6 +168,7 @@ export class HomeLinkApp {
         brightness: device.features.brightness,
         colorTemp: !!device.features.colorTemp,
         color: device.features.color,
+        ac: !!device.features.ac,
       },
       state: bridged.get(key)?.state ?? {},
     }));
@@ -149,9 +193,15 @@ export class HomeLinkApp {
         tuya: {
           connected: this.platforms.has('tuya'),
           configured: !!this.config.tuya,
-          region: this.config.tuya?.region ?? 'in',
+          region: this.config.tuya?.region ?? 'eu',
           deviceCount: this.deviceCount('tuya'),
           error: this.platformErrors.get('tuya') ?? null,
+        },
+        smartlife: {
+          connected: this.platforms.has('smartlife'),
+          configured: !!this.config.smartlife,
+          deviceCount: this.deviceCount('smartlife'),
+          error: this.platformErrors.get('smartlife') ?? null,
         },
       },
     };

@@ -17,6 +17,11 @@ import {
 
 const POLL_INTERVAL_MS = 10_000;
 
+// SmartThings AC modes ↔ HomeKit TargetHeaterCoolerState (AUTO=0, HEAT=1, COOL=2).
+// Dry/wind/fan have no HomeKit equivalent and are surfaced as COOL.
+const AC_MODE_TO_HK = { auto: 0, heat: 1, cool: 2, dry: 2, wind: 2, fan: 2, fanOnly: 2 };
+const HK_TO_AC_MODE = { 0: 'auto', 1: 'heat', 2: 'cool' };
+
 export class HomeKitBridge {
   constructor(config) {
     this.config = config;
@@ -104,6 +109,11 @@ export class HomeKitBridge {
 
     const record = { accessory, device, platform, state: {}, pending: null };
 
+    if (device.type === 'ac') {
+      record.service = this.#createAcService(accessory, record, device);
+      return record;
+    }
+
     const ServiceType =
       device.type === 'light' ? Service.Lightbulb : device.type === 'outlet' ? Service.Outlet : Service.Switch;
     const service = accessory.addService(ServiceType, device.name);
@@ -142,6 +152,70 @@ export class HomeKitBridge {
     }
 
     return record;
+  }
+
+  /** Air conditioners map to HomeKit's HeaterCooler service. */
+  #createAcService(accessory, record, device) {
+    const service = accessory.addService(Service.HeaterCooler, device.name);
+    const ac = device.features.ac;
+
+    const validTargets = [...new Set(
+      ac.modes.map((m) => AC_MODE_TO_HK[m]).filter((v) => v !== undefined)
+    )].sort();
+    if (!validTargets.length) validTargets.push(2);
+
+    service
+      .getCharacteristic(Characteristic.Active)
+      .onGet(() => (record.state.power ? 1 : 0))
+      .onSet((value) => this.#apply(record, { power: value === 1 }));
+
+    service
+      .getCharacteristic(Characteristic.CurrentHeaterCoolerState)
+      .onGet(() => this.#currentAcState(record.state));
+
+    service
+      .getCharacteristic(Characteristic.TargetHeaterCoolerState)
+      .setProps({ validValues: validTargets })
+      .onGet(() => AC_MODE_TO_HK[record.state.mode] ?? validTargets[validTargets.length - 1])
+      .onSet((value) => this.#apply(record, { mode: HK_TO_AC_MODE[value] }));
+
+    service
+      .getCharacteristic(Characteristic.CurrentTemperature)
+      .onGet(() => record.state.currentC ?? 24);
+
+    const setpointProps = { minValue: ac.minC, maxValue: ac.maxC, minStep: 0.5 };
+    service
+      .getCharacteristic(Characteristic.CoolingThresholdTemperature)
+      .setProps(setpointProps)
+      .onGet(() => this.#clampSetpoint(record.state.targetC, ac))
+      .onSet((value) => this.#apply(record, { targetC: Number(value) }));
+
+    if (validTargets.includes(0) || validTargets.includes(1)) {
+      // Home app shows a heating threshold in auto/heat modes; ACs have one
+      // setpoint, so both thresholds drive the same value.
+      service
+        .getCharacteristic(Characteristic.HeatingThresholdTemperature)
+        .setProps(setpointProps)
+        .onGet(() => this.#clampSetpoint(record.state.targetC, ac))
+        .onSet((value) => this.#apply(record, { targetC: Number(value) }));
+    }
+    return service;
+  }
+
+  #clampSetpoint(value, ac) {
+    return Math.max(ac.minC, Math.min(ac.maxC, value ?? Math.round((ac.minC + ac.maxC) / 2)));
+  }
+
+  // INACTIVE=0, IDLE=1, HEATING=2, COOLING=3 — inferred from mode + temps
+  #currentAcState(state) {
+    if (!state.power) return 0;
+    const current = state.currentC;
+    const target = state.targetC;
+    if (current === undefined || target === undefined) return 1;
+    const mode = state.mode;
+    if (mode === 'heat') return current < target ? 2 : 1;
+    if (mode === 'auto') return current > target ? 3 : current < target ? 2 : 1;
+    return current > target ? 3 : 1; // cool / dry / wind
   }
 
   /**
@@ -183,6 +257,22 @@ export class HomeKitBridge {
 
   #pushState(record) {
     const { service, state, device } = record;
+    if (device.type === 'ac') {
+      if (state.power !== undefined) service.updateCharacteristic(Characteristic.Active, state.power ? 1 : 0);
+      service.updateCharacteristic(Characteristic.CurrentHeaterCoolerState, this.#currentAcState(state));
+      if (state.mode !== undefined && AC_MODE_TO_HK[state.mode] !== undefined) {
+        service.updateCharacteristic(Characteristic.TargetHeaterCoolerState, AC_MODE_TO_HK[state.mode]);
+      }
+      if (state.currentC !== undefined) service.updateCharacteristic(Characteristic.CurrentTemperature, state.currentC);
+      if (state.targetC !== undefined) {
+        const clamped = this.#clampSetpoint(state.targetC, device.features.ac);
+        service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, clamped);
+        if (service.testCharacteristic(Characteristic.HeatingThresholdTemperature)) {
+          service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, clamped);
+        }
+      }
+      return;
+    }
     if (state.power !== undefined) service.updateCharacteristic(Characteristic.On, state.power);
     if (device.type !== 'light') return;
     if (device.features.brightness && state.brightness !== undefined) {
@@ -215,6 +305,7 @@ export class HomeKitBridge {
         brightness: r.device.features.brightness,
         colorTemp: !!r.device.features.colorTemp,
         color: r.device.features.color,
+        ac: !!r.device.features.ac,
       },
       state: {
         power: r.state.power,
@@ -222,6 +313,9 @@ export class HomeKitBridge {
         colorTempK: r.state.colorTempK,
         hue: r.state.hue,
         saturation: r.state.saturation,
+        mode: r.state.mode,
+        currentC: r.state.currentC,
+        targetC: r.state.targetC,
       },
     }));
   }

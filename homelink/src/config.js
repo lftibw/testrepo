@@ -31,6 +31,7 @@ const DEFAULTS = () => ({
   webPort: 8580,
   smartthings: null, // { token }
   tuya: null, // { accessId, accessSecret, region }
+  smartlife: null, // { userCode, endpoint, terminalId, tokenInfo } from QR login
   excludedDevices: [], // ["smartthings:<id>", "tuya:<id>"]
 });
 
