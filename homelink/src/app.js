@@ -3,8 +3,13 @@
  * HomeKit bridge. The web UI drives this through small async methods.
  */
 
+import crypto from 'node:crypto';
 import { saveConfig } from './config.js';
-import { SmartThingsPlatform } from './platforms/smartthings.js';
+import {
+  SmartThingsPlatform,
+  buildAuthorizeUrl,
+  exchangeCode,
+} from './platforms/smartthings.js';
 import { TuyaPlatform } from './platforms/tuya.js';
 import { SmartLifePlatform, createLoginQr, pollLogin } from './platforms/smartlife.js';
 import { HomeKitBridge } from './bridge.js';
@@ -19,7 +24,11 @@ export class HomeLinkApp {
   }
 
   async start() {
-    if (this.config.smartthings?.token) {
+    if (this.config.smartthings?.oauth) {
+      await this.attachSmartThings({ oauth: this.config.smartthings.oauth }).catch((err) =>
+        this.platformErrors.set('smartthings', err.message)
+      );
+    } else if (this.config.smartthings?.token) {
       await this.connectSmartThings(this.config.smartthings, { save: false }).catch((err) =>
         this.platformErrors.set('smartthings', err.message)
       );
@@ -51,6 +60,45 @@ export class HomeLinkApp {
     }
     await this.refreshDevices();
     return this.deviceCount('smartthings');
+  }
+
+  /** Step 1 of OAuth: returns the SmartThings authorize URL to visit. */
+  startSmartThingsOAuth({ clientId, clientSecret, redirectUri }) {
+    if (!clientId || !clientSecret) throw new Error('OAuth Client ID and Client Secret are required');
+    const state = crypto.randomUUID();
+    this.pendingSmartThingsOAuth = { clientId, clientSecret, redirectUri, state, createdAt: Date.now() };
+    return buildAuthorizeUrl({ clientId, redirectUri, state });
+  }
+
+  /** Step 2: OAuth redirect handler exchanges the code and connects. */
+  async completeSmartThingsOAuth({ code, state }) {
+    const pending = this.pendingSmartThingsOAuth;
+    if (!pending || pending.state !== state) throw new Error('OAuth state mismatch — restart the authorization from HomeLink');
+    this.pendingSmartThingsOAuth = null;
+    const tokens = await exchangeCode({
+      clientId: pending.clientId,
+      clientSecret: pending.clientSecret,
+      code,
+      redirectUri: pending.redirectUri,
+    });
+    const oauth = { clientId: pending.clientId, clientSecret: pending.clientSecret, ...tokens };
+    await this.attachSmartThings({ oauth });
+    this.config.smartthings = { oauth };
+    saveConfig(this.config);
+    return this.deviceCount('smartthings');
+  }
+
+  async attachSmartThings(auth) {
+    const platform = new SmartThingsPlatform(auth, (oauth) => {
+      if (this.config.smartthings?.oauth) {
+        this.config.smartthings.oauth = oauth;
+        saveConfig(this.config);
+      }
+    });
+    await platform.testConnection();
+    this.platforms.set('smartthings', platform);
+    this.platformErrors.delete('smartthings');
+    await this.refreshDevices();
   }
 
   async connectTuya({ accessId, accessSecret, region }, { save = true } = {}) {
@@ -187,6 +235,7 @@ export class HomeLinkApp {
         smartthings: {
           connected: this.platforms.has('smartthings'),
           configured: !!this.config.smartthings,
+          method: this.config.smartthings?.oauth ? 'oauth' : this.config.smartthings?.token ? 'token' : null,
           deviceCount: this.deviceCount('smartthings'),
           error: this.platformErrors.get('smartthings') ?? null,
         },

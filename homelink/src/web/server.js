@@ -36,6 +36,41 @@ export function createWebServer(app /* HomeLinkApp */) {
     res.json({ ok: true, deviceCount });
   }));
 
+  // The redirect URI must exactly match what the user registered on their
+  // OAuth app; derive it from how the portal is actually being reached.
+  const callbackUri = (req) => `${req.protocol}://${req.get('host')}/api/smartthings/callback`;
+
+  web.get('/api/smartthings/redirect-uri', wrap(async (req, res) => {
+    res.json({ redirectUri: callbackUri(req) });
+  }));
+
+  web.post('/api/smartthings/oauth/start', wrap(async (req, res) => {
+    const clientId = String(req.body?.clientId ?? '').trim();
+    const clientSecret = String(req.body?.clientSecret ?? '').trim();
+    const authorizeUrl = app.startSmartThingsOAuth({ clientId, clientSecret, redirectUri: callbackUri(req) });
+    res.json({ ok: true, authorizeUrl });
+  }));
+
+  web.get('/api/smartthings/callback', async (req, res) => {
+    const done = (title, body, ok) => res.status(ok ? 200 : 400).send(
+      `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">` +
+      `<title>${title}</title><body style="font:16px/1.5 -apple-system,sans-serif;max-width:460px;margin:80px auto;padding:0 20px;text-align:center;color:${ok ? '#0a7d33' : '#c0392b'}">` +
+      `<h2>${ok ? '✓' : '⚠️'} ${title}</h2><p style="color:#333">${body}</p>` +
+      (ok ? `<script>setTimeout(()=>window.close(),2500)</script>` : '') + `</body>`
+    );
+    try {
+      if (req.query.error) throw new Error(String(req.query.error_description || req.query.error));
+      const code = String(req.query.code ?? '');
+      const state = String(req.query.state ?? '');
+      if (!code) throw new Error('No authorization code returned');
+      const deviceCount = await app.completeSmartThingsOAuth({ code, state });
+      done('SmartThings connected', `Found ${deviceCount} device(s). You can close this tab and return to HomeLink.`, true);
+    } catch (err) {
+      console.error('[homelink] SmartThings OAuth callback failed:', err.message);
+      done('Authorization failed', err.message, false);
+    }
+  });
+
   web.post('/api/tuya', wrap(async (req, res) => {
     const accessId = String(req.body?.accessId ?? '').trim();
     const accessSecret = String(req.body?.accessSecret ?? '').trim();

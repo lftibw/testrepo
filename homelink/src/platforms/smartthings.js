@@ -20,33 +20,125 @@ const toC = (value, unit) => (unit === 'F' ? (Number(value) - 32) * 5 / 9 : Numb
 const fromC = (c, unit) => (unit === 'F' ? Math.round(c * 9 / 5 + 32) : Math.round(c * 2) / 2);
 
 const API_BASE = 'https://api.smartthings.com/v1';
+const OAUTH_AUTHORIZE = 'https://api.smartthings.com/oauth/authorize';
+const OAUTH_TOKEN = 'https://api.smartthings.com/oauth/token';
+
+// Scopes needed to list devices and send commands.
+export const SMARTTHINGS_SCOPES = ['r:devices:*', 'x:devices:*', 'r:locations:*'];
 
 // SmartThings device categories that we expose as HomeKit outlets/switches
 const OUTLET_CATEGORIES = new Set(['SmartPlug', 'Outlet']);
 const LIGHT_CATEGORIES = new Set(['Light', 'Bulb', 'LightStrip', 'Lamp']);
 
+/** Authorization-code flow: URL the user visits to grant access. */
+export function buildAuthorizeUrl({ clientId, redirectUri, state }) {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    scope: SMARTTHINGS_SCOPES.join(' '),
+    response_type: 'code',
+    redirect_uri: redirectUri,
+  });
+  if (state) params.set('state', state);
+  return `${OAUTH_AUTHORIZE}?${params.toString()}`;
+}
+
+async function tokenRequest(clientId, clientSecret, params) {
+  const res = await fetch(OAUTH_TOKEN, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) {
+    throw new Error(`SmartThings OAuth ${res.status}: ${data.error_description || data.error || 'token request failed'}`);
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    // Access token lives 24h; refresh a minute early. Refresh token lives 30d,
+    // renewed on every refresh, so a running app stays connected indefinitely.
+    expiresAt: Date.now() + (Number(data.expires_in) || 86400) * 1000,
+  };
+}
+
+/** Exchange the authorization code for the first access + refresh tokens. */
+export function exchangeCode({ clientId, clientSecret, code, redirectUri }) {
+  return tokenRequest(clientId, clientSecret, {
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: redirectUri,
+    client_id: clientId,
+  });
+}
+
+/** Trade a refresh token for a fresh access + refresh token pair. */
+export function refreshOAuthTokens(clientId, clientSecret, refreshToken) {
+  return tokenRequest(clientId, clientSecret, {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: clientId,
+  });
+}
+
 export class SmartThingsPlatform {
   name = 'smartthings';
   label = 'SmartThings';
 
-  constructor({ token }) {
-    this.token = token;
+  /**
+   * @param auth  Personal Access Token: { token }
+   *              OAuth: { oauth: { clientId, clientSecret, accessToken, refreshToken, expiresAt } }
+   * @param onTokenUpdate called with the refreshed oauth object so it can be persisted
+   */
+  constructor(auth, onTokenUpdate = () => {}) {
+    this.auth = auth;
+    this.onTokenUpdate = onTokenUpdate;
+    this.refreshing = null;
+  }
+
+  get usesOAuth() {
+    return !!this.auth.oauth;
+  }
+
+  /** Returns a currently-valid bearer token, refreshing the OAuth pair if due. */
+  async #bearerToken() {
+    if (!this.auth.oauth) return this.auth.token; // Personal Access Token
+    const o = this.auth.oauth;
+    if (o.accessToken && Date.now() < o.expiresAt - 60_000) return o.accessToken;
+    this.refreshing ??= (async () => {
+      try {
+        const fresh = await refreshOAuthTokens(o.clientId, o.clientSecret, o.refreshToken);
+        this.auth.oauth = { ...o, ...fresh };
+        this.onTokenUpdate(this.auth.oauth);
+      } finally {
+        this.refreshing = null;
+      }
+    })();
+    await this.refreshing;
+    return this.auth.oauth.accessToken;
   }
 
   async #request(path, options = {}) {
+    const token = await this.#bearerToken();
     const res = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers: {
-        Authorization: `Bearer ${this.token}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
         ...options.headers,
       },
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      const hint = res.status === 401
-        ? ' — the token is invalid or expired (SmartThings PATs last 24h); generate a new one at account.smartthings.com/tokens and reconnect'
-        : '';
+      let hint = '';
+      if (res.status === 401) {
+        hint = this.usesOAuth
+          ? ' — OAuth authorization was revoked or the refresh token expired (30d of inactivity); reconnect via “Authorize with SmartThings”'
+          : ' — the token is invalid or expired (SmartThings PATs last 24h); switch to “Auto-refresh (OAuth)” to stay connected, or paste a new token';
+      }
       throw new Error(`SmartThings API ${res.status} on ${path}: ${body.slice(0, 300)}${hint}`);
     }
     return res.json();

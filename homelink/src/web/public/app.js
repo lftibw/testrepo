@@ -35,8 +35,19 @@ async function loadStatus() {
   $('paired-msg').textContent = b.paired ? '✓ Paired with Apple Home' : 'Not paired yet';
   $('paired-msg').className = 'msg ' + (b.paired ? 'ok' : '');
 
-  renderPlatform('st', status.platforms.smartthings,
-    `Connected — ${status.platforms.smartthings.deviceCount} device(s) found`);
+  const st = status.platforms.smartthings;
+  $('st-dot').className = 'dot ' + (st.connected ? 'on' : st.error ? 'err' : '');
+  const stForms = !st.connected;
+  $('st-tabs').hidden = !stForms;
+  $('st-oauth-pane').hidden = !stForms || stTab !== 'oauth';
+  $('st-pat-pane').hidden = !stForms || stTab !== 'pat';
+  $('st-connected').hidden = !st.connected;
+  if (st.connected) {
+    const how = st.method === 'oauth' ? 'auto-refreshing OAuth — never expires' : 'personal token — expires in 24h';
+    $('st-summary').textContent = `Connected (${how}) — ${st.deviceCount} device(s) found`;
+  }
+  if (st.error) setMsg('st-msg', st.error, false);
+
   renderPlatform('tuya', status.platforms.tuya,
     `Connected (${status.platforms.tuya.region.toUpperCase()} region) — ${status.platforms.tuya.deviceCount} device(s) found`);
 
@@ -117,6 +128,59 @@ function escapeHtml(s) {
 async function refreshAll() {
   await Promise.all([loadStatus(), loadDevices()]);
 }
+
+// SmartThings method tabs (OAuth vs quick token)
+let stTab = 'oauth';
+document.querySelectorAll('#st-tabs .tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    stTab = tab.dataset.tab;
+    document.querySelectorAll('#st-tabs .tab').forEach((t) => t.classList.toggle('active', t === tab));
+    $('st-oauth-pane').hidden = stTab !== 'oauth';
+    $('st-pat-pane').hidden = stTab !== 'pat';
+  });
+});
+
+// Show the exact redirect URI the user must register on their OAuth app
+api('/api/smartthings/redirect-uri').then(({ redirectUri }) => {
+  $('st-redirect-uri').textContent = redirectUri;
+}).catch(() => {});
+
+let stOAuthPoll = null;
+
+$('st-oauth-connect').addEventListener('click', async () => {
+  const btn = $('st-oauth-connect');
+  btn.disabled = true;
+  setMsg('st-msg', 'Opening SmartThings authorization…', true);
+  try {
+    const { authorizeUrl } = await api('/api/smartthings/oauth/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        clientId: $('st-client-id').value.trim(),
+        clientSecret: $('st-client-secret').value.trim(),
+      }),
+    });
+    window.open(authorizeUrl, '_blank', 'noopener');
+    setMsg('st-msg', 'Approve in the SmartThings tab that opened, then this will connect automatically…', true);
+    // The callback connects server-side; poll status until it lands.
+    clearInterval(stOAuthPoll);
+    const startedAt = Date.now();
+    stOAuthPoll = setInterval(async () => {
+      const status = await api('/api/status');
+      if (status.platforms.smartthings.connected) {
+        clearInterval(stOAuthPoll);
+        setMsg('st-msg', 'Connected! Auto-refresh is on — this stays linked permanently.', true);
+        await refreshAll();
+      } else if (Date.now() - startedAt > 5 * 60_000) {
+        clearInterval(stOAuthPoll);
+        setMsg('st-msg', 'Timed out waiting for authorization. Try again.', false);
+      }
+    }, 2500);
+  } catch (err) {
+    setMsg('st-msg', err.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 $('st-connect').addEventListener('click', async () => {
   const btn = $('st-connect');

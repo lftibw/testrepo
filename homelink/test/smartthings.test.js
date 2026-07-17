@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SmartThingsPlatform } from '../src/platforms/smartthings.js';
+import {
+  SmartThingsPlatform,
+  buildAuthorizeUrl,
+  exchangeCode,
+  refreshOAuthTokens,
+} from '../src/platforms/smartthings.js';
 
 function mockFetch(routes) {
   return async (url, options = {}) => {
@@ -12,6 +17,71 @@ function mockFetch(routes) {
     return { ok: true, json: async () => result };
   };
 }
+
+test('buildAuthorizeUrl includes scopes, redirect and state', () => {
+  const url = new URL(buildAuthorizeUrl({
+    clientId: 'cid', redirectUri: 'http://localhost:8580/api/smartthings/callback', state: 'xyz',
+  }));
+  assert.equal(url.origin + url.pathname, 'https://api.smartthings.com/oauth/authorize');
+  assert.equal(url.searchParams.get('client_id'), 'cid');
+  assert.equal(url.searchParams.get('response_type'), 'code');
+  assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:8580/api/smartthings/callback');
+  assert.equal(url.searchParams.get('state'), 'xyz');
+  assert.equal(url.searchParams.get('scope'), 'r:devices:* x:devices:* r:locations:*');
+});
+
+test('exchangeCode posts authorization_code with Basic auth and parses tokens', async (t) => {
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    sent = { url, options };
+    return { ok: true, json: async () => ({ access_token: 'AT', refresh_token: 'RT', expires_in: 86400 }) };
+  });
+  const tokens = await exchangeCode({ clientId: 'cid', clientSecret: 'sec', code: 'C', redirectUri: 'http://x/cb' });
+  assert.equal(sent.url, 'https://api.smartthings.com/oauth/token');
+  assert.equal(sent.options.headers.Authorization, 'Basic ' + Buffer.from('cid:sec').toString('base64'));
+  const body = new URLSearchParams(sent.options.body);
+  assert.equal(body.get('grant_type'), 'authorization_code');
+  assert.equal(body.get('code'), 'C');
+  assert.equal(body.get('redirect_uri'), 'http://x/cb');
+  assert.equal(tokens.accessToken, 'AT');
+  assert.equal(tokens.refreshToken, 'RT');
+  assert.ok(tokens.expiresAt > Date.now());
+});
+
+test('OAuth platform auto-refreshes an expired token and persists it', async (t) => {
+  const updates = [];
+  const auth = {
+    oauth: {
+      clientId: 'cid', clientSecret: 'sec', accessToken: 'old', refreshToken: 'RT0',
+      expiresAt: Date.now() - 1000, // already expired
+    },
+  };
+  const platform = new SmartThingsPlatform(auth, (o) => updates.push(o));
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    const u = new URL(url);
+    if (u.pathname === '/oauth/token') {
+      const body = new URLSearchParams(options.body);
+      assert.equal(body.get('grant_type'), 'refresh_token');
+      assert.equal(body.get('refresh_token'), 'RT0');
+      return { ok: true, json: async () => ({ access_token: 'new', refresh_token: 'RT1', expires_in: 86400 }) };
+    }
+    // the actual API call should now carry the refreshed token
+    assert.equal(options.headers.Authorization, 'Bearer new');
+    return { ok: true, json: async () => ({ items: [] }) };
+  });
+  await platform.testConnection();
+  assert.equal(auth.oauth.accessToken, 'new');
+  assert.equal(auth.oauth.refreshToken, 'RT1');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].refreshToken, 'RT1');
+});
+
+test('refreshOAuthTokens surfaces OAuth errors', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => ({
+    ok: false, status: 400, json: async () => ({ error: 'invalid_grant', error_description: 'expired' }),
+  }));
+  await assert.rejects(() => refreshOAuthTokens('cid', 'sec', 'RT'), /expired/);
+});
 
 const COLOR_BULB = {
   deviceId: 'st-bulb-1',

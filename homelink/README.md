@@ -45,13 +45,27 @@ Notes for Mac servers:
 - An **Apple TV or HomePod** on the same network automatically becomes a *home hub*, which gives you control when away from home and enables automations — no extra setup in HomeLink needed.
 - The portal is also reachable from your phone at `http://<your-mac-name>.local:8580`.
 
-### 1. Connect SmartThings
+### 1. Connect SmartThings — two ways
+
+#### Method A — Auto-refresh OAuth (recommended, stays connected)
+
+A personal token expires every 24 hours; OAuth uses a **refresh token** that HomeLink renews automatically, so the connection never expires. One-time setup:
+
+1. Install the SmartThings CLI: `npm i -g @smartthings/cli` (or grab a binary from [releases](https://github.com/SmartThingsCommunity/smartthings-cli/releases)).
+2. Run `smartthings apps:create` → choose **OAuth-In SmartApp**.
+3. Scopes: `r:devices:*`, `x:devices:*`, `r:locations:*`.
+4. Redirect URI: the exact value shown in HomeLink's SmartThings card (e.g. `http://localhost:8580/api/smartthings/callback`).
+5. The CLI prints an **OAuth Client ID** and **Client Secret** — paste them into HomeLink, click **Authorize with SmartThings**, and approve in the page that opens.
+
+HomeLink stores the refresh token and renews it on every run (access tokens last 24h, the refresh token lasts 30 days and is reissued each refresh), so as long as HomeLink runs at least once a month it stays linked indefinitely.
+
+#### Method B — Quick token (24h, for a fast test)
 
 1. Go to [account.smartthings.com/tokens](https://account.smartthings.com/tokens) and sign in with your Samsung account.
 2. *Generate new token* → name it "HomeLink" → check the **Devices** scopes (list, see, control).
-3. Paste the token in the SmartThings card.
+3. Paste the token in the SmartThings card's **Quick token** tab.
 
-> ⚠️ PATs created after Dec 2024 expire after 24 hours. For long-term use, set up a SmartThings OAuth app, or simply paste a fresh token when needed — device pairing with HomeKit is *not* lost when a token expires.
+> ⚠️ PATs created after Dec 2024 expire after 24 hours. HomeKit pairing is *not* lost when a token expires, but you'd have to paste a fresh one daily — use Method A to avoid that.
 
 ### 2. Connect Wipro — two ways
 

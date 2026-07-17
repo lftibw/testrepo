@@ -89,6 +89,11 @@
     font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
     color: var(--ok); margin-left: 4px;
   }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 5px; word-break: break-all;
+  }
 </style>
 </head>
 <body>
@@ -113,21 +118,51 @@
   <div class="row">
     <div class="card" id="st-card">
       <h2><span class="dot" id="st-dot"></span> SmartThings</h2>
-      <p class="sub">Samsung SmartThings account — lights, switches and plugs.</p>
-      <div id="st-form">
-        <label for="st-token">Personal Access Token</label>
-        <input id="st-token" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
-        <button id="st-connect">Connect SmartThings</button>
-        <details>
-          <summary>How do I get a token?</summary>
-          <ol>
-            <li>Go to <a href="https://account.smartthings.com/tokens" target="_blank" rel="noopener">account.smartthings.com/tokens</a> and sign in with your Samsung account.</li>
-            <li>Click <em>Generate new token</em>, name it “HomeLink”.</li>
-            <li>Check the <strong>Devices</strong> scopes (list, see, control).</li>
-            <li>Copy the token and paste it above. <em>Note: tokens created after Dec 2024 expire in 24h — reconnect here to refresh, or use a long-lived token/OAuth for production.</em></li>
-          </ol>
-        </details>
+      <p class="sub">Samsung SmartThings account — lights, switches, plugs & ACs.</p>
+
+      <div class="tabs" id="st-tabs">
+        <button class="tab active" data-tab="oauth">Auto-refresh <span class="rec">stays connected</span></button>
+        <button class="tab" data-tab="pat">Quick token</button>
       </div>
+
+      <div id="st-oauth-pane">
+        <div id="st-oauth-form">
+          <label for="st-client-id">OAuth Client ID</label>
+          <input id="st-client-id" autocomplete="off" placeholder="from smartthings apps:create">
+          <label for="st-client-secret">OAuth Client Secret</label>
+          <input id="st-client-secret" type="password" autocomplete="off">
+          <button id="st-oauth-connect">Authorize with SmartThings</button>
+          <details>
+            <summary>How do I set this up? (connects permanently, no daily re-token)</summary>
+            <ol>
+              <li>Install the SmartThings CLI: <code>npm i -g @smartthings/cli</code> (or download it from <a href="https://github.com/SmartThingsCommunity/smartthings-cli/releases" target="_blank" rel="noopener">GitHub releases</a>).</li>
+              <li>Run <code>smartthings apps:create</code> → choose <strong>OAuth-In SmartApp</strong>.</li>
+              <li>Scopes: enter <code>r:devices:*</code>, <code>x:devices:*</code>, <code>r:locations:*</code>.</li>
+              <li>Redirect URI: paste <code id="st-redirect-uri">…</code> exactly.</li>
+              <li>The CLI prints an <strong>OAuth Client ID</strong> and <strong>Client Secret</strong> — enter them above, then click Authorize and approve in the SmartThings page that opens.</li>
+            </ol>
+            <p>Why: this uses a refresh token that HomeLink renews automatically, so the connection never expires (unlike a 24-hour personal token).</p>
+          </details>
+        </div>
+      </div>
+
+      <div id="st-pat-pane" hidden>
+        <div id="st-form">
+          <label for="st-token">Personal Access Token</label>
+          <input id="st-token" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+          <button id="st-connect">Connect with token</button>
+          <details>
+            <summary>How do I get a token?</summary>
+            <ol>
+              <li>Go to <a href="https://account.smartthings.com/tokens" target="_blank" rel="noopener">account.smartthings.com/tokens</a> and sign in.</li>
+              <li>Click <em>Generate new token</em>, name it “HomeLink”.</li>
+              <li>Check the <strong>Devices</strong> scopes (list, see, control).</li>
+              <li>Copy the token and paste it above. <strong>⚠️ Tokens created after Dec 2024 expire in 24h</strong> — use the <em>Auto-refresh</em> tab to stay connected permanently.</li>
+            </ol>
+          </details>
+        </div>
+      </div>
+
       <div id="st-connected" hidden>
         <p class="msg ok" id="st-summary"></p>
         <button class="secondary" id="st-disconnect">Disconnect</button>
