@@ -47,6 +47,8 @@ Notes for Mac servers:
 
 ### 1. Connect SmartThings — two ways
 
+> **Multiple accounts:** you can connect more than one SmartThings account at once (e.g. yours plus a family member's, so their AC shows up in your Home too). Each connection is added and disconnected independently in the SmartThings card, and its devices carry the account label. Use either method below per account — for a second account, sign in with *that* account when the OAuth page opens, or paste a token generated from that account.
+
 #### Method A — Auto-refresh OAuth (recommended, stays connected)
 
 A personal token expires every 24 hours; OAuth uses a **refresh token** that HomeLink renews automatically, so the connection never expires. One-time setup:

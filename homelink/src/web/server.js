@@ -31,8 +31,9 @@ export function createWebServer(app /* HomeLinkApp */) {
 
   web.post('/api/smartthings', wrap(async (req, res) => {
     const token = String(req.body?.token ?? '').trim();
+    const label = String(req.body?.label ?? '').trim();
     if (!token) throw new Error('A SmartThings personal access token is required');
-    const deviceCount = await app.connectSmartThings({ token });
+    const deviceCount = await app.connectSmartThings({ token, label });
     res.json({ ok: true, deviceCount });
   }));
 
@@ -47,7 +48,8 @@ export function createWebServer(app /* HomeLinkApp */) {
   web.post('/api/smartthings/oauth/start', wrap(async (req, res) => {
     const clientId = String(req.body?.clientId ?? '').trim();
     const clientSecret = String(req.body?.clientSecret ?? '').trim();
-    const authorizeUrl = app.startSmartThingsOAuth({ clientId, clientSecret, redirectUri: callbackUri(req) });
+    const label = String(req.body?.label ?? '').trim();
+    const authorizeUrl = app.startSmartThingsOAuth({ clientId, clientSecret, label, redirectUri: callbackUri(req) });
     res.json({ ok: true, authorizeUrl });
   }));
 
@@ -91,10 +93,11 @@ export function createWebServer(app /* HomeLinkApp */) {
     res.json(await app.pollSmartLifeLogin());
   }));
 
-  web.delete('/api/platform/:name', wrap(async (req, res) => {
-    const { name } = req.params;
-    if (!['smartthings', 'tuya', 'smartlife'].includes(name)) throw new Error('Unknown platform');
-    app.disconnectPlatform(name);
+  web.delete('/api/platform/:connId', wrap(async (req, res) => {
+    const connId = req.params.connId;
+    const known = connId === 'tuya' || connId === 'smartlife' || connId.startsWith('smartthings:');
+    if (!known) throw new Error('Unknown platform');
+    app.disconnectPlatform(connId);
     res.json({ ok: true });
   }));
 

@@ -94,6 +94,23 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
     padding: 1px 5px; word-break: break-all;
   }
+  .acct {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px;
+  }
+  .acct .meta { min-width: 0; }
+  .acct .nm { font-weight: 600; }
+  .acct .det { font-size: 12px; color: var(--muted); }
+  .acct .det.err { color: var(--err); }
+  .acct button { margin-top: 0; padding: 6px 12px; font-size: 13px; }
+  .add-block { margin-top: 4px; }
+  .add-block > summary {
+    cursor: pointer; color: var(--accent); font-weight: 600; font-size: 14px; list-style: none;
+    padding: 8px 0;
+  }
+  .add-block[open] > summary { margin-bottom: 6px; }
+  .badge.ok { background: rgba(48,164,108,.12); color: var(--ok); }
+  .badge.warn { background: rgba(217,45,32,.12); color: var(--err); }
 </style>
 </head>
 <body>
@@ -118,15 +135,21 @@
   <div class="row">
     <div class="card" id="st-card">
       <h2><span class="dot" id="st-dot"></span> SmartThings</h2>
-      <p class="sub">Samsung SmartThings account — lights, switches, plugs & ACs.</p>
+      <p class="sub">Samsung SmartThings accounts — lights, switches, plugs & ACs. Connect more than one (e.g. yours and a family member’s).</p>
 
-      <div class="tabs" id="st-tabs">
-        <button class="tab active" data-tab="oauth">Auto-refresh <span class="rec">stays connected</span></button>
-        <button class="tab" data-tab="pat">Quick token</button>
-      </div>
+      <div id="st-accounts"></div>
 
-      <div id="st-oauth-pane">
-        <div id="st-oauth-form">
+      <details id="st-add" class="add-block">
+        <summary id="st-add-summary">＋ Add a SmartThings account</summary>
+        <label for="st-label">Label (optional)</label>
+        <input id="st-label" placeholder="e.g. Mine, Brother" autocomplete="off">
+
+        <div class="tabs" id="st-tabs">
+          <button class="tab active" data-tab="oauth">Auto-refresh <span class="rec">stays connected</span></button>
+          <button class="tab" data-tab="pat">Quick token</button>
+        </div>
+
+        <div id="st-oauth-pane">
           <label for="st-client-id">OAuth Client ID</label>
           <input id="st-client-id" autocomplete="off" placeholder="from smartthings apps:create">
           <label for="st-client-secret">OAuth Client Secret</label>
@@ -139,34 +162,26 @@
               <li>Run <code>smartthings apps:create</code> → choose <strong>OAuth-In SmartApp</strong>.</li>
               <li>Scopes: enter <code>r:devices:*</code>, <code>x:devices:*</code>, <code>r:locations:*</code>.</li>
               <li>Redirect URI: paste <code id="st-redirect-uri">…</code> exactly.</li>
-              <li>The CLI prints an <strong>OAuth Client ID</strong> and <strong>Client Secret</strong> — enter them above, then click Authorize and approve in the SmartThings page that opens.</li>
+              <li>The CLI prints an <strong>OAuth Client ID</strong> and <strong>Client Secret</strong> — enter them above, then click Authorize and approve in the SmartThings page that opens. To add another account, sign in with that account when the SmartThings page opens.</li>
             </ol>
             <p>Why: this uses a refresh token that HomeLink renews automatically, so the connection never expires (unlike a 24-hour personal token).</p>
           </details>
         </div>
-      </div>
 
-      <div id="st-pat-pane" hidden>
-        <div id="st-form">
+        <div id="st-pat-pane" hidden>
           <label for="st-token">Personal Access Token</label>
           <input id="st-token" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
           <button id="st-connect">Connect with token</button>
           <details>
             <summary>How do I get a token?</summary>
             <ol>
-              <li>Go to <a href="https://account.smartthings.com/tokens" target="_blank" rel="noopener">account.smartthings.com/tokens</a> and sign in.</li>
-              <li>Click <em>Generate new token</em>, name it “HomeLink”.</li>
-              <li>Check the <strong>Devices</strong> scopes (list, see, control).</li>
+              <li>Sign in to <a href="https://account.smartthings.com/tokens" target="_blank" rel="noopener">account.smartthings.com/tokens</a> <strong>with the account you want to add</strong>.</li>
+              <li>Click <em>Generate new token</em>, name it “HomeLink”, check the <strong>Devices</strong> scopes (list, see, control).</li>
               <li>Copy the token and paste it above. <strong>⚠️ Tokens created after Dec 2024 expire in 24h</strong> — use the <em>Auto-refresh</em> tab to stay connected permanently.</li>
             </ol>
           </details>
         </div>
-      </div>
-
-      <div id="st-connected" hidden>
-        <p class="msg ok" id="st-summary"></p>
-        <button class="secondary" id="st-disconnect">Disconnect</button>
-      </div>
+      </details>
       <div class="msg" id="st-msg"></div>
     </div>
 

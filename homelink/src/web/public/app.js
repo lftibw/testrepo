@@ -35,18 +35,7 @@ async function loadStatus() {
   $('paired-msg').textContent = b.paired ? '✓ Paired with Apple Home' : 'Not paired yet';
   $('paired-msg').className = 'msg ' + (b.paired ? 'ok' : '');
 
-  const st = status.platforms.smartthings;
-  $('st-dot').className = 'dot ' + (st.connected ? 'on' : st.error ? 'err' : '');
-  const stForms = !st.connected;
-  $('st-tabs').hidden = !stForms;
-  $('st-oauth-pane').hidden = !stForms || stTab !== 'oauth';
-  $('st-pat-pane').hidden = !stForms || stTab !== 'pat';
-  $('st-connected').hidden = !st.connected;
-  if (st.connected) {
-    const how = st.method === 'oauth' ? 'auto-refreshing OAuth — never expires' : 'personal token — expires in 24h';
-    $('st-summary').textContent = `Connected (${how}) — ${st.deviceCount} device(s) found`;
-  }
-  if (st.error) setMsg('st-msg', st.error, false);
+  renderSmartThings(status.platforms.smartthings);
 
   renderPlatform('tuya', status.platforms.tuya,
     `Connected (${status.platforms.tuya.region.toUpperCase()} region) — ${status.platforms.tuya.deviceCount} device(s) found`);
@@ -59,6 +48,36 @@ async function loadStatus() {
   // one dot for the whole Wipro card: green if either method is connected
   $('tuya-dot').className = 'dot ' + ((sl.connected || status.platforms.tuya.connected) ? 'on'
     : (sl.error || status.platforms.tuya.error) ? 'err' : '');
+}
+
+function renderSmartThings(st) {
+  const accounts = st.accounts ?? [];
+  const anyConnected = accounts.some((a) => a.connected);
+  const anyError = accounts.some((a) => a.error);
+  $('st-dot').className = 'dot ' + (anyConnected ? 'on' : anyError ? 'err' : '');
+
+  $('st-accounts').innerHTML = accounts.map((a) => {
+    const how = a.method === 'oauth' ? 'auto-refresh · never expires' : 'token · expires 24h';
+    const detail = a.error
+      ? `<div class="det err">${escapeHtml(a.error).slice(0, 120)}</div>`
+      : `<div class="det">${a.connected ? '✓ connected' : '…connecting'} · ${how} · ${a.deviceCount} device(s)</div>`;
+    return `<div class="acct">
+      <div class="meta"><div class="nm">${escapeHtml(a.label)} <span class="badge ${a.error ? 'warn' : 'ok'}">${a.method === 'oauth' ? 'OAuth' : 'PAT'}</span></div>${detail}</div>
+      <button class="secondary" data-disconnect="${escapeHtml(a.connId)}">Disconnect</button>
+    </div>`;
+  }).join('');
+
+  $('st-accounts').querySelectorAll('button[data-disconnect]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await api(`/api/platform/${encodeURIComponent(btn.dataset.disconnect)}`, { method: 'DELETE' }).catch((e) => alert(e.message));
+      await refreshAll();
+    });
+  });
+
+  // Keep the add form open by default until at least one account exists.
+  const addBlock = $('st-add');
+  if (accounts.length && !addBlock.dataset.touched) addBlock.open = false;
+  else if (!accounts.length && !addBlock.dataset.touched) addBlock.open = true;
 }
 
 const FEATURE_LABELS = [
@@ -91,7 +110,7 @@ async function loadDevices() {
   const rows = devices.map((d) => `
     <tr>
       <td><strong>${escapeHtml(d.name)}</strong><br><span style="color:var(--muted);font-size:12px">${escapeHtml(d.model || '')}</span></td>
-      <td><span class="badge ${d.platform === 'smartthings' ? 'st' : 'tuya'}">${escapeHtml(d.platformLabel)}</span></td>
+      <td><span class="badge ${d.platform === 'smartthings' ? 'st' : 'tuya'}">${escapeHtml(d.platformLabel)}</span>${d.account ? `<br><span style="color:var(--muted);font-size:11px">${escapeHtml(d.account)}</span>` : ''}</td>
       <td>${escapeHtml(d.type)}</td>
       <td>${FEATURE_LABELS.filter(([k]) => d.features[k]).map(([, l]) => `<span class="chip">${l}</span>`).join('') || '<span class="chip">on/off</span>'}</td>
       <td>${describeState(d)}</td>
@@ -140,10 +159,26 @@ document.querySelectorAll('#st-tabs .tab').forEach((tab) => {
   });
 });
 
+// Remember when the user is actively using the add form so it isn't auto-collapsed
+$('st-add').addEventListener('toggle', () => {
+  if ($('st-add').open) $('st-add').dataset.touched = '1';
+});
+
 // Show the exact redirect URI the user must register on their OAuth app
 api('/api/smartthings/redirect-uri').then(({ redirectUri }) => {
   $('st-redirect-uri').textContent = redirectUri;
 }).catch(() => {});
+
+async function connectedAccountCount() {
+  const status = await api('/api/status');
+  return (status.platforms.smartthings.accounts ?? []).filter((a) => a.connected).length;
+}
+
+function resetStAddForm() {
+  ['st-label', 'st-client-id', 'st-client-secret', 'st-token'].forEach((id) => { $(id).value = ''; });
+  delete $('st-add').dataset.touched;
+  $('st-add').open = false;
+}
 
 let stOAuthPoll = null;
 
@@ -152,23 +187,25 @@ $('st-oauth-connect').addEventListener('click', async () => {
   btn.disabled = true;
   setMsg('st-msg', 'Opening SmartThings authorization…', true);
   try {
+    const before = await connectedAccountCount();
     const { authorizeUrl } = await api('/api/smartthings/oauth/start', {
       method: 'POST',
       body: JSON.stringify({
         clientId: $('st-client-id').value.trim(),
         clientSecret: $('st-client-secret').value.trim(),
+        label: $('st-label').value.trim(),
       }),
     });
     window.open(authorizeUrl, '_blank', 'noopener');
     setMsg('st-msg', 'Approve in the SmartThings tab that opened, then this will connect automatically…', true);
-    // The callback connects server-side; poll status until it lands.
+    // The callback connects server-side; poll until a new account appears.
     clearInterval(stOAuthPoll);
     const startedAt = Date.now();
     stOAuthPoll = setInterval(async () => {
-      const status = await api('/api/status');
-      if (status.platforms.smartthings.connected) {
+      if ((await connectedAccountCount()) > before) {
         clearInterval(stOAuthPoll);
-        setMsg('st-msg', 'Connected! Auto-refresh is on — this stays linked permanently.', true);
+        setMsg('st-msg', 'Connected! Auto-refresh is on — this account stays linked permanently.', true);
+        resetStAddForm();
         await refreshAll();
       } else if (Date.now() - startedAt > 5 * 60_000) {
         clearInterval(stOAuthPoll);
@@ -189,9 +226,10 @@ $('st-connect').addEventListener('click', async () => {
   try {
     const { deviceCount } = await api('/api/smartthings', {
       method: 'POST',
-      body: JSON.stringify({ token: $('st-token').value }),
+      body: JSON.stringify({ token: $('st-token').value, label: $('st-label').value.trim() }),
     });
     setMsg('st-msg', `Connected! Found ${deviceCount} device(s).`, true);
+    resetStAddForm();
     await refreshAll();
   } catch (err) {
     setMsg('st-msg', err.message, false);
@@ -220,12 +258,6 @@ $('tuya-connect').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
-});
-
-$('st-disconnect').addEventListener('click', async () => {
-  await api('/api/platform/smartthings', { method: 'DELETE' });
-  setMsg('st-msg', '', true);
-  await refreshAll();
 });
 
 $('tuya-disconnect').addEventListener('click', async () => {

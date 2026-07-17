@@ -29,7 +29,8 @@ const DEFAULTS = () => ({
     port: 51826,
   },
   webPort: 8580,
-  smartthings: null, // { token }
+  smartthings: null, // legacy single account; migrated to smartthingsAccounts on load
+  smartthingsAccounts: [], // [{ id, label, token } | { id, label, oauth }]
   tuya: null, // { accessId, accessSecret, region }
   smartlife: null, // { userCode, endpoint, terminalId, tokenInfo } from QR login
   excludedDevices: [], // ["smartthings:<id>", "tuya:<id>"]

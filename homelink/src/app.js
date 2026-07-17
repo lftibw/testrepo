@@ -14,6 +14,9 @@ import { TuyaPlatform } from './platforms/tuya.js';
 import { SmartLifePlatform, createLoginQr, pollLogin } from './platforms/smartlife.js';
 import { HomeKitBridge } from './bridge.js';
 
+/** Connection id for a SmartThings account (platforms are keyed by this). */
+const connIdFor = (accountId) => `smartthings:${accountId}`;
+
 export class HomeLinkApp {
   constructor(config) {
     this.config = config;
@@ -24,15 +27,12 @@ export class HomeLinkApp {
   }
 
   async start() {
-    if (this.config.smartthings?.oauth) {
-      await this.attachSmartThings({ oauth: this.config.smartthings.oauth }).catch((err) =>
-        this.platformErrors.set('smartthings', err.message)
-      );
-    } else if (this.config.smartthings?.token) {
-      await this.connectSmartThings(this.config.smartthings, { save: false }).catch((err) =>
-        this.platformErrors.set('smartthings', err.message)
+    for (const account of this.#stAccounts()) {
+      await this.attachSmartThingsAccount(account).catch((err) =>
+        this.platformErrors.set(connIdFor(account.id), err.message)
       );
     }
+    saveConfig(this.config); // persist any legacy→accounts migration
     if (this.config.tuya?.accessId) {
       await this.connectTuya(this.config.tuya, { save: false }).catch((err) =>
         this.platformErrors.set('tuya', err.message)
@@ -49,28 +49,62 @@ export class HomeLinkApp {
     }, 5 * 60_000);
   }
 
-  async connectSmartThings({ token }, { save = true } = {}) {
-    const platform = new SmartThingsPlatform({ token });
-    await platform.testConnection();
-    this.platforms.set('smartthings', platform);
-    this.platformErrors.delete('smartthings');
-    if (save) {
-      this.config.smartthings = { token };
-      saveConfig(this.config);
+  /**
+   * Returns the SmartThings accounts array, migrating a legacy single-account
+   * config (config.smartthings) into it the first time it's accessed.
+   */
+  #stAccounts() {
+    if (!Array.isArray(this.config.smartthingsAccounts)) this.config.smartthingsAccounts = [];
+    if (this.config.smartthings) {
+      const legacy = this.config.smartthings;
+      this.config.smartthingsAccounts.push({
+        id: crypto.randomUUID(),
+        label: 'SmartThings',
+        ...(legacy.oauth ? { oauth: legacy.oauth } : { token: legacy.token }),
+      });
+      this.config.smartthings = null;
     }
+    return this.config.smartthingsAccounts;
+  }
+
+  /** Connects one SmartThings account (PAT or OAuth) and registers it. */
+  async attachSmartThingsAccount(account) {
+    const auth = account.oauth ? { oauth: account.oauth } : { token: account.token };
+    const connId = connIdFor(account.id);
+    const platform = new SmartThingsPlatform(auth, (oauth) => {
+      const acc = this.#stAccounts().find((a) => a.id === account.id);
+      if (acc) {
+        acc.oauth = oauth;
+        saveConfig(this.config);
+      }
+    });
+    platform.connId = connId;
+    platform.accountId = account.id;
+    platform.accountLabel = account.label;
+    await platform.testConnection();
+    this.platforms.set(connId, platform);
+    this.platformErrors.delete(connId);
     await this.refreshDevices();
-    return this.deviceCount('smartthings');
+  }
+
+  /** Adds a SmartThings account via Personal Access Token. */
+  async connectSmartThings({ token, label }) {
+    const account = { id: crypto.randomUUID(), label: (label || '').trim() || 'SmartThings', token };
+    await this.attachSmartThingsAccount(account);
+    this.#stAccounts().push(account);
+    saveConfig(this.config);
+    return this.deviceCountByConn(connIdFor(account.id));
   }
 
   /** Step 1 of OAuth: returns the SmartThings authorize URL to visit. */
-  startSmartThingsOAuth({ clientId, clientSecret, redirectUri }) {
+  startSmartThingsOAuth({ clientId, clientSecret, redirectUri, label }) {
     if (!clientId || !clientSecret) throw new Error('OAuth Client ID and Client Secret are required');
     const state = crypto.randomUUID();
-    this.pendingSmartThingsOAuth = { clientId, clientSecret, redirectUri, state, createdAt: Date.now() };
+    this.pendingSmartThingsOAuth = { clientId, clientSecret, redirectUri, state, label, createdAt: Date.now() };
     return buildAuthorizeUrl({ clientId, redirectUri, state });
   }
 
-  /** Step 2: OAuth redirect handler exchanges the code and connects. */
+  /** Step 2: OAuth redirect handler exchanges the code and adds the account. */
   async completeSmartThingsOAuth({ code, state }) {
     const pending = this.pendingSmartThingsOAuth;
     if (!pending || pending.state !== state) throw new Error('OAuth state mismatch — restart the authorization from HomeLink');
@@ -81,28 +115,20 @@ export class HomeLinkApp {
       code,
       redirectUri: pending.redirectUri,
     });
-    const oauth = { clientId: pending.clientId, clientSecret: pending.clientSecret, ...tokens };
-    await this.attachSmartThings({ oauth });
-    this.config.smartthings = { oauth };
+    const account = {
+      id: crypto.randomUUID(),
+      label: (pending.label || '').trim() || 'SmartThings',
+      oauth: { clientId: pending.clientId, clientSecret: pending.clientSecret, ...tokens },
+    };
+    await this.attachSmartThingsAccount(account);
+    this.#stAccounts().push(account);
     saveConfig(this.config);
-    return this.deviceCount('smartthings');
-  }
-
-  async attachSmartThings(auth) {
-    const platform = new SmartThingsPlatform(auth, (oauth) => {
-      if (this.config.smartthings?.oauth) {
-        this.config.smartthings.oauth = oauth;
-        saveConfig(this.config);
-      }
-    });
-    await platform.testConnection();
-    this.platforms.set('smartthings', platform);
-    this.platformErrors.delete('smartthings');
-    await this.refreshDevices();
+    return this.deviceCountByConn(connIdFor(account.id));
   }
 
   async connectTuya({ accessId, accessSecret, region }, { save = true } = {}) {
     const platform = new TuyaPlatform({ accessId, accessSecret, region });
+    platform.connId = 'tuya';
     await platform.testConnection();
     this.platforms.set('tuya', platform);
     this.platformErrors.delete('tuya');
@@ -141,27 +167,36 @@ export class HomeLinkApp {
         saveConfig(this.config);
       }
     });
+    platform.connId = 'smartlife';
     await platform.testConnection();
     this.platforms.set('smartlife', platform);
     this.platformErrors.delete('smartlife');
     await this.refreshDevices();
   }
 
-  disconnectPlatform(name) {
-    if (name === 'smartlife') {
-      this.platforms.get('smartlife')?.logout();
+  /** Disconnects one connection by id: 'tuya', 'smartlife', or 'smartthings:<accountId>'. */
+  disconnectPlatform(connId) {
+    const platform = this.platforms.get(connId);
+    if (connId === 'smartlife') {
+      platform?.logout();
       this.pendingSmartLife = null;
+      this.config.smartlife = null;
+    } else if (connId === 'tuya') {
+      this.config.tuya = null;
+    } else if (connId.startsWith('smartthings:')) {
+      const id = connId.slice('smartthings:'.length);
+      this.config.smartthingsAccounts = this.#stAccounts().filter((a) => a.id !== id);
     }
-    this.platforms.delete(name);
-    this.platformErrors.delete(name);
-    this.config[name] = null;
+    this.platforms.delete(connId);
+    this.platformErrors.delete(connId);
     saveConfig(this.config);
     for (const [key, entry] of this.devices) {
-      if (entry.platform.name === name) this.devices.delete(key);
+      if (entry.platform === platform) this.devices.delete(key);
     }
     this.bridge.syncDevices([...this.devices.values()]);
   }
 
+  /** Devices from all connections of a kind ('smartthings' | 'tuya' | 'smartlife'). */
   deviceCount(platformName) {
     let count = 0;
     for (const entry of this.devices.values()) {
@@ -170,20 +205,32 @@ export class HomeLinkApp {
     return count;
   }
 
+  /** Devices from a single connection. */
+  deviceCountByConn(connId) {
+    let count = 0;
+    for (const entry of this.devices.values()) {
+      if (entry.platform.connId === connId) count++;
+    }
+    return count;
+  }
+
   async refreshDevices() {
     for (const platform of this.platforms.values()) {
       try {
         const devices = await platform.listDevices();
+        // Clear only THIS connection's devices (identity, not kind) so
+        // multiple SmartThings accounts don't wipe each other out.
         for (const [key, entry] of this.devices) {
-          if (entry.platform.name === platform.name) this.devices.delete(key);
+          if (entry.platform === platform) this.devices.delete(key);
         }
         for (const device of devices) {
           this.devices.set(HomeKitBridge.deviceKey(device), { device, platform });
         }
-        this.platformErrors.delete(platform.name);
+        this.platformErrors.delete(platform.connId);
       } catch (err) {
-        this.platformErrors.set(platform.name, err.message);
-        console.error(`[homelink] ${platform.label} device sync failed:`, err.message);
+        this.platformErrors.set(platform.connId, err.message);
+        const who = platform.accountLabel ? `${platform.label} (${platform.accountLabel})` : platform.label;
+        console.error(`[homelink] ${who} device sync failed:`, err.message);
       }
     }
     this.bridge.syncDevices([...this.devices.values()]);
@@ -206,6 +253,7 @@ export class HomeLinkApp {
       key,
       platform: platform.name,
       platformLabel: platform.label,
+      account: platform.accountLabel ?? null,
       name: device.name,
       model: device.model,
       type: device.type,
@@ -233,11 +281,18 @@ export class HomeLinkApp {
       },
       platforms: {
         smartthings: {
-          connected: this.platforms.has('smartthings'),
-          configured: !!this.config.smartthings,
-          method: this.config.smartthings?.oauth ? 'oauth' : this.config.smartthings?.token ? 'token' : null,
           deviceCount: this.deviceCount('smartthings'),
-          error: this.platformErrors.get('smartthings') ?? null,
+          accounts: this.#stAccounts().map((a) => {
+            const connId = connIdFor(a.id);
+            return {
+              connId,
+              label: a.label,
+              method: a.oauth ? 'oauth' : 'token',
+              connected: this.platforms.has(connId),
+              deviceCount: this.deviceCountByConn(connId),
+              error: this.platformErrors.get(connId) ?? null,
+            };
+          }),
         },
         tuya: {
           connected: this.platforms.has('tuya'),
