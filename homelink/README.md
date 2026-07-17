@@ -16,6 +16,7 @@ HomeLink runs a single HomeKit **bridge** (built on [HAP-NodeJS](https://github.
 - **SmartThings**: log in with a Personal Access Token; lights, dimmers, color bulbs, switches, and plugs are auto-discovered.
 - **Wipro / Tuya**: Wipro Next Smart Home runs on the Tuya cloud — link your app account to a free Tuya IoT project and HomeLink discovers and controls the devices, including brightness, white temperature, and full color (with correct v1/v2 data-point scaling read from each device's specification).
 - **Native HomeKit**: one QR-code pairing; on/off, brightness, color temperature, and hue/saturation all mapped to HomeKit characteristics; state polled and pushed back so the Home app stays in sync with the physical switches and the vendor apps.
+- **Web remote** (`/remote`): a control dashboard in the browser — power, brightness, warmth, color, and full AC controls (mode + temperature). Any change is sent to the device *and* mirrored into HomeKit, so the web remote and the Home app always agree. Reachable from your phone at `http://<your-mac-name>.local:8580/remote`.
 
 ## Quick start
 

@@ -243,6 +243,23 @@ export class HomeKitBridge {
     }, 75);
   }
 
+  /** Current cached state for a bridged device (used by the web remote). */
+  getState(key) {
+    return this.accessories.get(key)?.state ?? null;
+  }
+
+  /**
+   * Reflects an externally-initiated change (e.g. the web remote) into the
+   * cached state and HomeKit characteristics, so the Home app updates too.
+   * No-op for excluded devices (no bridged accessory).
+   */
+  reflectExternalChange(key, changes) {
+    const record = this.accessories.get(key);
+    if (!record) return;
+    Object.assign(record.state, changes);
+    this.#pushState(record);
+  }
+
   async refreshStates() {
     const records = [...this.accessories.values()];
     await Promise.allSettled(

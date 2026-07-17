@@ -109,13 +109,21 @@
     padding: 8px 0;
   }
   .add-block[open] > summary { margin-bottom: 6px; }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .navlink {
+    font-size: 14px; font-weight: 600; text-decoration: none; color: var(--accent);
+    border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; white-space: nowrap;
+  }
   .badge.ok { background: rgba(48,164,108,.12); color: var(--ok); }
   .badge.warn { background: rgba(217,45,32,.12); color: var(--err); }
 </style>
 </head>
 <body>
 <header>
-  <h1>🏠 HomeLink</h1>
+  <div class="nav">
+    <h1>🏠 HomeLink</h1>
+    <a class="navlink" href="/remote">🎛 Remote →</a>
+  </div>
   <p>One bridge that brings your <strong>SmartThings</strong> and <strong>Wipro smart</strong> devices into Apple HomeKit — natively.</p>
 </header>
 <main>

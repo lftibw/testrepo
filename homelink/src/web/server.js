@@ -115,5 +115,15 @@ export function createWebServer(app /* HomeLinkApp */) {
     res.json({ ok: true });
   }));
 
+  // Web remote: apply a control change to a device.
+  web.post('/api/devices/:key/control', wrap(async (req, res) => {
+    const result = await app.controlDevice(req.params.key, req.body ?? {});
+    res.json(result);
+  }));
+
+  web.get('/remote', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'remote.html'));
+  });
+
   return web;
 }

@@ -237,6 +237,28 @@ export class HomeLinkApp {
     await this.bridge.refreshStates().catch(() => {});
   }
 
+  /**
+   * Controls a device from the web remote: sends the change to the platform
+   * cloud, then mirrors it into the HomeKit bridge so the Home app matches.
+   */
+  async controlDevice(key, changes) {
+    const entry = this.devices.get(key);
+    if (!entry) throw new Error('Unknown device');
+    const allowed = ['power', 'brightness', 'colorTempK', 'hue', 'saturation', 'mode', 'targetC'];
+    const clean = {};
+    for (const k of allowed) if (changes[k] !== undefined) clean[k] = changes[k];
+    if (!Object.keys(clean).length) throw new Error('No supported control values provided');
+
+    // Tuya colour commands need the current brightness for the HSV "value".
+    const outbound = { ...clean };
+    if ((clean.hue !== undefined || clean.saturation !== undefined) && clean.brightness === undefined) {
+      outbound._currentBrightness = this.bridge.getState(key)?.brightness;
+    }
+    await entry.platform.setState(entry.device.id, outbound, entry.device);
+    this.bridge.reflectExternalChange(key, clean);
+    return { ok: true, state: this.bridge.getState(key) ?? clean };
+  }
+
   setDeviceExcluded(key, excluded) {
     const set = new Set(this.config.excludedDevices ?? []);
     if (excluded) set.add(key);
@@ -264,7 +286,9 @@ export class HomeLinkApp {
         brightness: device.features.brightness,
         colorTemp: !!device.features.colorTemp,
         color: device.features.color,
-        ac: !!device.features.ac,
+        ac: device.features.ac
+          ? { modes: device.features.ac.modes, minC: device.features.ac.minC, maxC: device.features.ac.maxC }
+          : false,
       },
       state: bridged.get(key)?.state ?? {},
     }));
