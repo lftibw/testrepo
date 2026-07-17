@@ -3,6 +3,17 @@ const toastEl = document.getElementById('toast');
 
 const AC_MODE_LABELS = { auto: 'Auto', cool: 'Cool', heat: 'Heat', dry: 'Dry', wind: 'Fan', fanOnly: 'Fan', fan: 'Fan' };
 
+// hue/saturation presets for color bulbs
+const PRESET_COLORS = [
+  { name: 'Warm', h: 30, s: 55 }, { name: 'White', h: 0, s: 0 }, { name: 'Red', h: 0, s: 100 },
+  { name: 'Orange', h: 30, s: 100 }, { name: 'Green', h: 120, s: 90 }, { name: 'Cyan', h: 180, s: 85 },
+  { name: 'Blue', h: 220, s: 95 }, { name: 'Purple', h: 280, s: 85 }, { name: 'Pink', h: 320, s: 70 },
+];
+const TIMER_PRESETS = [15, 30, 60];
+
+let filter = 'all';        // 'all' | 'light' | 'outlet' | 'switch' | 'ac'
+let lastDevices = [];
+
 function toast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.add('show');
@@ -95,11 +106,21 @@ function buildCard(d) {
     if (d.features.color) {
       controls += `<div class="ctl colorrow"><span class="lbl" style="display:block">Color</span>
         <input type="color" data-role="color" value="#ffaa55"></div>`;
+      const swatches = PRESET_COLORS.map((c) =>
+        `<span class="sw" title="${c.name}" data-h="${c.h}" data-s="${c.s}" style="background:${hsvToHex(c.h, c.s)}"></span>`).join('');
+      controls += `<div class="ctl"><div class="presets" data-role="presets">${swatches}</div></div>`;
     }
     if (!d.features.brightness && !d.features.colorTemp && !d.features.color) {
       controls += `<div class="plain">On / off</div>`;
     }
   }
+
+  // Auto-off timer (every device can be powered off)
+  const timerBtns = TIMER_PRESETS.map((m) => `<button class="mini" data-mins="${m}">${m}m</button>`).join('');
+  controls += `<div class="ctl"><div class="timerrow" data-role="timer">
+    <span data-role="timer-label">Auto-off:</span>${timerBtns}
+    <button class="mini" data-mins="0" data-role="timer-cancel" hidden>Cancel</button>
+  </div></div>`;
 
   el.innerHTML = `
     <div class="top">
@@ -152,6 +173,34 @@ function wireCard(el, d) {
       });
     });
   }
+  const presets = q('presets');
+  if (presets) {
+    presets.querySelectorAll('.sw').forEach((sw) => {
+      sw.addEventListener('click', () => {
+        control(key, { hue: Number(sw.dataset.h), saturation: Number(sw.dataset.s) });
+        const color = q('color');
+        if (color) color.value = hsvToHex(Number(sw.dataset.h), Number(sw.dataset.s));
+      });
+    });
+  }
+  const timer = q('timer');
+  if (timer) {
+    timer.querySelectorAll('button[data-mins]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const minutes = Number(b.dataset.mins);
+        cooldown.set(key, Date.now());
+        try {
+          const res = await fetch(`/api/devices/${encodeURIComponent(key)}/timer`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ minutes }),
+          });
+          const data = await res.json();
+          setTimer(el, data.firesAt);
+        } catch { toast('Could not set timer'); }
+      });
+    });
+  }
+
   const down = q('temp-down'), up = q('temp-up');
   if (down && up) {
     const step = (delta) => {
@@ -174,6 +223,79 @@ function setPower(el, on) {
   el.classList.toggle('off', !on);
   const p = el.querySelector('[data-role="power"]');
   if (p) p.classList.toggle('on', on);
+}
+
+function setTimer(el, firesAt) {
+  el.dataset.firesAt = firesAt || '';
+  renderTimer(el);
+}
+
+function renderTimer(el) {
+  const label = el.querySelector('[data-role="timer-label"]');
+  const cancel = el.querySelector('[data-role="timer-cancel"]');
+  const presets = el.querySelectorAll('[data-role="timer"] button[data-mins]:not([data-role="timer-cancel"])');
+  if (!label) return;
+  const firesAt = Number(el.dataset.firesAt);
+  if (firesAt && firesAt > Date.now()) {
+    const secs = Math.round((firesAt - Date.now()) / 1000);
+    const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+    const ss = String(secs % 60).padStart(2, '0');
+    label.innerHTML = `<span class="active">Off in ${mm}:${ss}</span>`;
+    presets.forEach((b) => (b.hidden = true));
+    if (cancel) cancel.hidden = false;
+  } else {
+    label.textContent = 'Auto-off:';
+    presets.forEach((b) => (b.hidden = false));
+    if (cancel) cancel.hidden = true;
+  }
+}
+
+// Tick down any visible auto-off countdowns once a second.
+setInterval(() => {
+  for (const el of cards.values()) if (el.dataset.firesAt) renderTimer(el);
+}, 1000);
+
+async function scene(types, changes, label) {
+  try {
+    const res = await fetch('/api/scene', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ types, changes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Scene failed');
+    toast(`${label}: ${data.ok}/${data.total} devices`);
+    for (const el of cards.values()) cooldown.set(el.dataset.key, Date.now());
+    setTimeout(load, 600);
+  } catch (err) { toast(err.message); }
+}
+
+function renderChrome(devices) {
+  const lights = devices.filter((d) => d.type === 'light');
+  const onCount = devices.filter((d) => d.state.power).length;
+  const litLights = lights.filter((d) => d.state.power).length;
+  const parts = [`<b>${onCount}</b> of <b>${devices.length}</b> devices on`];
+  if (lights.length) parts.push(`<b>${litLights}</b> of <b>${lights.length}</b> lights lit`);
+  document.getElementById('summary').innerHTML = parts.join(' · ');
+
+  const types = [...new Set(devices.map((d) => d.type))];
+  const order = ['light', 'outlet', 'switch', 'ac'];
+  const label = { light: 'Lights', outlet: 'Plugs', switch: 'Switches', ac: 'ACs' };
+  const chips = ['all', ...order.filter((t) => types.includes(t))];
+  const fl = document.getElementById('filters');
+  fl.innerHTML = chips.map((t) =>
+    `<span class="chip ${filter === t ? 'active' : ''}" data-filter="${t}">${t === 'all' ? 'All' : label[t]}</span>`).join('');
+  fl.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+    filter = c.dataset.filter;
+    fl.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === c));
+    applyFilter();
+  }));
+}
+
+function applyFilter() {
+  for (const [key, el] of cards) {
+    const d = lastDevices.find((x) => x.key === key);
+    el.style.display = (!d || filter === 'all' || d.type === filter) ? '' : 'none';
+  }
 }
 
 function updateCard(el, d) {
@@ -202,6 +324,8 @@ function updateCard(el, d) {
   }
   if (q('target') && s.targetC !== undefined) q('target').textContent = Math.round(s.targetC);
   if (q('current') && s.currentC !== undefined) q('current').textContent = Math.round(s.currentC);
+
+  if (String(d.timerFiresAt || '') !== (el.dataset.firesAt || '')) setTimer(el, d.timerFiresAt);
 }
 
 async function load() {
@@ -212,8 +336,11 @@ async function load() {
   } catch {
     return;
   }
+  lastDevices = devices;
+  document.getElementById('filters').style.display = devices.length ? '' : 'none';
   if (!devices.length) {
     grid.innerHTML = '<div class="empty">No devices yet — connect a platform in <a href="/">Setup</a>.</div>';
+    document.getElementById('summary').textContent = 'No devices connected';
     cards.clear();
     return;
   }
@@ -232,7 +359,14 @@ async function load() {
     const el = cards.get(d.key);
     if (el) updateCard(el, d);
   }
+  renderChrome(devices);
+  applyFilter();
 }
+
+document.getElementById('all-lights-on').addEventListener('click', () => scene(['light'], { power: true }, 'Lights on'));
+document.getElementById('all-lights-off').addEventListener('click', () => scene(['light'], { power: false }, 'Lights off'));
+document.getElementById('all-off').addEventListener('click', () => scene(null, { power: false }, 'Everything off'));
+document.getElementById('refresh').addEventListener('click', load);
 
 load();
 setInterval(load, 4000);

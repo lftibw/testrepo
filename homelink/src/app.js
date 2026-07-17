@@ -23,6 +23,7 @@ export class HomeLinkApp {
     this.platforms = new Map(); // name -> platform instance
     this.devices = new Map(); // key -> { device, platform }
     this.platformErrors = new Map(); // name -> last error message
+    this.timers = new Map(); // device key -> { timeout, firesAt } auto-off timers
     this.bridge = new HomeKitBridge(config);
   }
 
@@ -259,6 +260,40 @@ export class HomeLinkApp {
     return { ok: true, state: this.bridge.getState(key) ?? clean };
   }
 
+  /**
+   * Applies one change to every device (optionally filtered by type), e.g.
+   * "all lights off". Returns how many succeeded.
+   */
+  async controlScene({ types = null, changes }) {
+    const targets = [...this.devices.entries()].filter(
+      ([, e]) => !types || types.includes(e.device.type)
+    );
+    const results = await Promise.allSettled(targets.map(([key]) => this.controlDevice(key, changes)));
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length) console.error('[homelink] scene: %d/%d failed', failed.length, targets.length);
+    return { total: targets.length, ok: results.length - failed.length };
+  }
+
+  /** Schedules the device to turn off after `minutes` (0/null cancels). */
+  setDeviceTimer(key, minutes) {
+    if (!this.devices.has(key)) throw new Error('Unknown device');
+    const existing = this.timers.get(key);
+    if (existing) clearTimeout(existing.timeout);
+    this.timers.delete(key);
+    if (!minutes || minutes <= 0) return { firesAt: null };
+    const ms = Math.min(minutes, 24 * 60) * 60_000;
+    const firesAt = Date.now() + ms;
+    const timeout = setTimeout(() => {
+      this.timers.delete(key);
+      this.controlDevice(key, { power: false }).catch((err) =>
+        console.error(`[homelink] auto-off "${key}" failed:`, err.message)
+      );
+    }, ms);
+    timeout.unref?.();
+    this.timers.set(key, { timeout, firesAt });
+    return { firesAt };
+  }
+
   setDeviceExcluded(key, excluded) {
     const set = new Set(this.config.excludedDevices ?? []);
     if (excluded) set.add(key);
@@ -291,6 +326,7 @@ export class HomeLinkApp {
           : false,
       },
       state: bridged.get(key)?.state ?? {},
+      timerFiresAt: this.timers.get(key)?.firesAt ?? null,
     }));
   }
 

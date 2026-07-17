@@ -111,6 +111,57 @@ test('controlDevice rejects unknown device and empty changes', async () => {
   await assert.rejects(() => app.controlDevice('smartthings:l3', { bogus: 1 }), /No supported control/);
 });
 
+test('controlScene applies a change only to matching device types', async () => {
+  const app = new HomeLinkApp(baseConfig());
+  const calls = [];
+  const platform = {
+    name: 'smartthings', label: 'SmartThings', connId: 'smartthings:c',
+    async listDevices() { return [lightDevice('l1', 'Lamp'), stDevice('p1', 'Plug')]; },
+    async getState() { return { power: true }; },
+    async setState(id, changes) { calls.push({ id, changes }); },
+  };
+  app.platforms.set('smartthings:c', platform);
+  await app.refreshDevices();
+
+  const res = await app.controlScene({ types: ['light'], changes: { power: false } });
+  assert.equal(res.total, 1);
+  assert.equal(res.ok, 1);
+  assert.deepEqual(calls.map((c) => c.id), ['l1']); // plug untouched
+
+  calls.length = 0;
+  await app.controlScene({ types: null, changes: { power: false } });
+  assert.deepEqual(calls.map((c) => c.id).sort(), ['l1', 'p1']); // all devices
+});
+
+test('setDeviceTimer schedules an auto-off, reports it, and fires', async (t) => {
+  const app = new HomeLinkApp(baseConfig());
+  const calls = [];
+  const platform = controllablePlatform([lightDevice('l1', 'Lamp')], () => ({ power: true }), (r) => calls.push(r));
+  app.platforms.set('smartthings:c', platform);
+  await app.refreshDevices();
+  const key = 'smartthings:l1';
+
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { firesAt } = app.setDeviceTimer(key, 30);
+  assert.ok(firesAt > Date.now());
+  assert.equal(app.allDevices().find((d) => d.key === key).timerFiresAt, firesAt);
+
+  t.mock.timers.tick(30 * 60 * 1000 + 5);
+  assert.deepEqual(calls.at(-1).changes, { power: false }); // auto-off fired
+});
+
+test('setDeviceTimer cancels with 0 and rejects unknown devices', async () => {
+  const app = new HomeLinkApp(baseConfig());
+  const platform = controllablePlatform([lightDevice('l1', 'Lamp')], () => ({}), () => {});
+  app.platforms.set('smartthings:c', platform);
+  await app.refreshDevices();
+  const key = 'smartthings:l1';
+  app.setDeviceTimer(key, 30);
+  assert.equal(app.setDeviceTimer(key, 0).firesAt, null);
+  assert.equal(app.allDevices().find((d) => d.key === key).timerFiresAt, null);
+  assert.throws(() => app.setDeviceTimer('smartthings:nope', 30), /Unknown device/);
+});
+
 test('legacy single-account config migrates into smartthingsAccounts', () => {
   const config = baseConfig();
   delete config.smartthingsAccounts;

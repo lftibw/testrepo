@@ -86,6 +86,35 @@
   .tempval .t { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .tempval .cur { font-size: 12px; color: var(--muted); }
   .plain { font-size: 13px; color: var(--muted); }
+  .bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .summary { font-size: 14px; color: var(--muted); }
+  .summary b { color: var(--text); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button {
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    border-radius: 999px; padding: 7px 14px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  }
+  .actions button.warn { color: var(--err); }
+  .actions button:active { transform: scale(.97); }
+  .filters { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--card); color: var(--muted);
+    border-radius: 999px; padding: 5px 13px; font-size: 13px; cursor: pointer;
+  }
+  .chip.active { background: var(--accent); color: #fff; border-color: transparent; }
+  .presets { display: flex; gap: 7px; flex-wrap: wrap; }
+  .presets .sw {
+    width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); cursor: pointer;
+  }
+  .timerrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+  .timerrow .mini {
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    border-radius: 8px; padding: 3px 9px; font-size: 12px; cursor: pointer;
+  }
+  .timerrow .active { color: var(--ok); font-weight: 600; }
   .empty { color: var(--muted); text-align: center; padding: 60px 0; }
   .toast {
     position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -104,6 +133,16 @@
   <p>Control your SmartThings & Wipro devices from here — changes sync to Apple Home too.</p>
 </header>
 <main>
+  <div class="bar">
+    <div class="summary" id="summary">Loading…</div>
+    <div class="actions">
+      <button id="all-lights-on">💡 Lights on</button>
+      <button id="all-lights-off">🌙 Lights off</button>
+      <button id="all-off" class="warn">⏻ Everything off</button>
+      <button id="refresh" title="Refresh">↻</button>
+    </div>
+  </div>
+  <div class="filters" id="filters"></div>
   <div class="grid" id="grid"><div class="empty">Loading devices…</div></div>
 </main>
 <div class="toast" id="toast"></div>

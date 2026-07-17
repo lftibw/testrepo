@@ -121,6 +121,18 @@ export function createWebServer(app /* HomeLinkApp */) {
     res.json(result);
   }));
 
+  // Web remote: master actions (e.g. all lights off) and auto-off timers.
+  web.post('/api/scene', wrap(async (req, res) => {
+    const types = Array.isArray(req.body?.types) ? req.body.types : null;
+    const changes = req.body?.changes ?? {};
+    res.json(await app.controlScene({ types, changes }));
+  }));
+
+  web.post('/api/devices/:key/timer', wrap(async (req, res) => {
+    const minutes = Number(req.body?.minutes) || 0;
+    res.json(app.setDeviceTimer(req.params.key, minutes));
+  }));
+
   web.get('/remote', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'remote.html'));
   });
