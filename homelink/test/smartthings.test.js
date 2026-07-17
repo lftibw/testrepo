@@ -76,6 +76,35 @@ test('OAuth platform auto-refreshes an expired token and persists it', async (t)
   assert.equal(updates[0].refreshToken, 'RT1');
 });
 
+test('refreshed OAuth tokens persist so a restart reconnects without re-login', async (t) => {
+  // "config on disk" — what gets saved and reloaded across a restart.
+  const saved = { clientId: 'c', clientSecret: 's', accessToken: 'old', refreshToken: 'R0', expiresAt: Date.now() - 1 };
+
+  // Session 1: platform loads the (expired) saved token; first request refreshes
+  // it and writes the new pair back to the saved config.
+  const session1 = new SmartThingsPlatform({ oauth: saved }, (o) => Object.assign(saved, o));
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    if (new URL(url).pathname === '/oauth/token') {
+      return { ok: true, json: async () => ({ access_token: 'new', refresh_token: 'R1', expires_in: 86400 }) };
+    }
+    return { ok: true, json: async () => ({ items: [] }) };
+  });
+  await session1.testConnection();
+  assert.equal(saved.accessToken, 'new');
+  assert.equal(saved.refreshToken, 'R1'); // persisted to "disk"
+
+  // Session 2 = after restart: a fresh platform loads the SAME saved config and
+  // is immediately valid — no re-login, and it uses the persisted token.
+  const session2 = new SmartThingsPlatform({ oauth: { ...saved } });
+  let usedAuth;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    usedAuth = options.headers.Authorization;
+    return { ok: true, json: async () => ({ items: [] }) };
+  });
+  await session2.testConnection();
+  assert.equal(usedAuth, 'Bearer new'); // reconnected from saved token, no OAuth round-trip
+});
+
 test('refreshOAuthTokens surfaces OAuth errors', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => ({
     ok: false, status: 400, json: async () => ({ error: 'invalid_grant', error_description: 'expired' }),
