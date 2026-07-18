@@ -167,6 +167,7 @@ function buildCard(d) {
         <div class="nm">${escapeHtml(d.name)}</div>
         <div class="sub">${escapeHtml(d.platformLabel)}${acct}${online}</div>
         <div class="energy" data-role="energy"></div>
+        <div class="energy total" data-role="energy-total"></div>
       </div>
       <button class="pow" data-role="power" title="Power">⏻</button>
     </div>
@@ -294,11 +295,27 @@ function renderEnergy(el, d) {
   const est = e.estimated ? '~' : '';
   const parts = [`⚡ ${est}${e.watts} W`];
   if (e.costPerHour != null && e.costPerHour > 0) parts.push(`${fmtMoney(e.costPerHour, e.currency)}/hr`);
-  if (e.kwh != null) parts.push(`${e.kwh} kWh`);
-  box.textContent = parts.join(' · ');
+  box.textContent = parts.join(' · '); // cumulative kWh lives on the Σ total line below
   box.title = e.estimated
     ? `Estimated draw. ~${fmtMoney(e.costPerDay, e.currency)}/day if left on.`
     : `Measured. ~${fmtMoney(e.costPerDay, e.currency)}/day at this draw.`;
+}
+
+function renderTotal(el, d) {
+  const e = d.energy || {};
+  const box = el.querySelector('[data-role="energy-total"]');
+  if (!box) return;
+  if (!e.totalKwh || e.totalKwh < 0.001) { box.textContent = ''; box.onclick = null; return; }
+  const kwh = e.totalKwh < 10 ? e.totalKwh.toFixed(2) : e.totalKwh.toFixed(1);
+  const cost = e.totalCost != null ? ` · ${fmtMoney(e.totalCost, e.currency)}` : '';
+  box.innerHTML = `Σ ${kwh} kWh${cost} total <button class="reset" title="Reset total" data-reset>⟲</button>`;
+  const since = e.since ? new Date(e.since).toLocaleString() : '';
+  box.title = since ? `Total consumption since ${since}` : 'Total consumption tracked by HomeLink';
+  box.querySelector('[data-reset]').addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    await fetch(`/api/devices/${encodeURIComponent(d.key)}/energy/reset`, { method: 'POST' }).catch(() => {});
+    load({ reactive: true });
+  });
 }
 
 function setTimer(el, firesAt) {
@@ -383,6 +400,7 @@ function updateCard(el, d) {
 
   if (s.power !== undefined) setPower(el, !!s.power);
   renderEnergy(el, d);
+  renderTotal(el, d);
 
   const bright = q('bright');
   if (bright && s.brightness !== undefined && bright !== active) {

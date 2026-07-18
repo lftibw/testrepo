@@ -71,6 +71,13 @@
   .sub .acct { color: var(--accent); }
   .energy { font-size: 12px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
   .energy:empty { display: none; }
+  .energy.total { color: var(--accent); opacity: .9; }
+  .energy .reset {
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px;
+    padding: 0 2px; vertical-align: middle; transition: transform .3s, color .2s;
+  }
+  .energy .reset:hover { color: var(--accent); }
+  .energy .reset:active { transform: rotate(-180deg); }
   .dev.off .ctrls { pointer-events: none; opacity: .5; filter: grayscale(.35); transition: opacity .3s, filter .3s; }
   .rate { font-size: 12px; color: var(--muted); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
   .rate input {

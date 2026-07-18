@@ -4,8 +4,9 @@
  */
 
 import crypto from 'node:crypto';
-import { saveConfig } from './config.js';
+import { saveConfig, dataDir } from './config.js';
 import { computeEnergy } from './energy.js';
+import { EnergyTracker } from './energy-tracker.js';
 import {
   SmartThingsPlatform,
   buildAuthorizeUrl,
@@ -25,6 +26,7 @@ export class HomeLinkApp {
     this.devices = new Map(); // key -> { device, platform }
     this.platformErrors = new Map(); // name -> last error message
     this.timers = new Map(); // device key -> { timeout, firesAt } auto-off timers
+    this.energyTracker = new EnergyTracker(dataDir());
     this.bridge = new HomeKitBridge(config);
   }
 
@@ -49,6 +51,9 @@ export class HomeLinkApp {
     this.deviceRefreshTimer = setInterval(() => {
       this.refreshDevices().catch((err) => console.error('[homelink] device refresh error:', err.message));
     }, 5 * 60_000);
+    // Accumulate total energy consumption once a minute.
+    this.sampleEnergy();
+    this.energyTimer = setInterval(() => this.sampleEnergy(), 60_000);
   }
 
   /**
@@ -369,8 +374,35 @@ export class HomeLinkApp {
       },
       state: bridged.get(key)?.state ?? {},
       timerFiresAt: this.timers.get(key)?.firesAt ?? null,
-      energy: computeEnergy(device, bridged.get(key)?.state ?? {}, this.config.energy),
+      energy: this.#energyView(device, bridged.get(key)?.state ?? {}, key),
     }));
+  }
+
+  #energyView(device, state, key) {
+    const e = computeEnergy(device, state, this.config.energy);
+    const total = this.energyTracker.total(key);
+    e.totalKwh = total.kwh;
+    e.since = total.since;
+    const price = Number(this.config.energy?.pricePerKwh) || 0;
+    e.totalCost = Number((total.kwh * price).toFixed(2));
+    return e;
+  }
+
+  /** Samples current draw for every device into the cumulative energy tracker. */
+  sampleEnergy() {
+    const entries = [];
+    for (const [key, { device }] of this.devices) {
+      const state = this.bridge.getState(key) ?? {};
+      const e = computeEnergy(device, state, this.config.energy);
+      entries.push({ key, watts: e.watts, energyKwh: e.kwh });
+    }
+    this.energyTracker.sample(entries);
+  }
+
+  resetDeviceEnergy(key) {
+    if (!this.devices.has(key)) throw new Error('Unknown device');
+    this.energyTracker.reset(key);
+    return { ok: true };
   }
 
   energyRate() {
