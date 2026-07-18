@@ -46,6 +46,26 @@ async function control(key, changes) {
   } catch (err) {
     toast(err.message);
   }
+  // An action can trigger secondary changes on the device (e.g. Max mode
+  // shifting the setpoint). Re-pull the real state a couple of times so the
+  // UI converges to what the device actually did.
+  settle(key);
+}
+
+// Refresh device state shortly after an action to catch side-effects.
+function settle(key) {
+  clearTimeout(settle._t?.[key]);
+  settle._t ??= {};
+  const at = (ms) => setTimeout(() => load({ reactive: true }), ms);
+  settle._t[key] = at(1400);
+  at(3000);
+}
+
+function pulse(el) {
+  if (!el) return;
+  el.classList.remove('flash');
+  void el.offsetWidth; // restart the animation
+  el.classList.add('flash');
 }
 
 // --- HSV <-> hex helpers (hue 0-360, sat 0-100; value fixed full for swatch) ---
@@ -299,7 +319,8 @@ async function scene(types, changes, label) {
     if (!res.ok) throw new Error(data.error || 'Scene failed');
     toast(`${label}: ${data.ok}/${data.total} devices`);
     for (const el of cards.values()) cooldown.set(el.dataset.key, Date.now());
-    setTimeout(load, 600);
+    setTimeout(load, 1400);
+    setTimeout(load, 3000);
   } catch (err) { toast(err.message); }
 }
 
@@ -333,7 +354,7 @@ function applyFilter() {
 }
 
 function updateCard(el, d) {
-  if (Date.now() - (cooldown.get(d.key) || 0) < 2500) return; // don't fight a just-made change
+  if (Date.now() - (cooldown.get(d.key) || 0) < 1100) return; // brief guard against stale-poll flicker
   const q = (role) => el.querySelector(`[data-role="${role}"]`);
   const s = d.state || {};
   const active = document.activeElement;
@@ -342,6 +363,7 @@ function updateCard(el, d) {
 
   const bright = q('bright');
   if (bright && s.brightness !== undefined && bright !== active) {
+    if (bright.value !== String(s.brightness)) pulse(q('bright-val'));
     bright.value = s.brightness; q('bright-val').textContent = `${s.brightness}%`;
   }
   const ct = q('ct');
@@ -356,7 +378,10 @@ function updateCard(el, d) {
   if (modes && s.mode) {
     modes.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.mode === s.mode));
   }
-  if (q('target') && s.targetC !== undefined) q('target').textContent = Math.round(s.targetC);
+  if (q('target') && s.targetC !== undefined) {
+    const nv = String(Math.round(s.targetC));
+    if (q('target').textContent !== nv) { q('target').textContent = nv; pulse(el.querySelector('.tempval .t')); }
+  }
   if (q('current') && s.currentC !== undefined) q('current').textContent = Math.round(s.currentC);
   const opts = q('opts');
   if (opts && s.optionalMode) {
@@ -409,4 +434,4 @@ document.getElementById('all-off').addEventListener('click', () => scene(null, {
 document.getElementById('refresh').addEventListener('click', load);
 
 load();
-setInterval(load, 4000);
+setInterval(load, 3000);

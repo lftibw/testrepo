@@ -257,7 +257,27 @@ export class HomeLinkApp {
     }
     await entry.platform.setState(entry.device.id, outbound, entry.device);
     this.bridge.reflectExternalChange(key, clean);
+    // An action can cause side-effects on the device (e.g. Max shifting the
+    // setpoint). Re-read the real state shortly after so the cached state —
+    // which the web remote and HomeKit both read — reflects them.
+    this.#scheduleStateReread(key);
     return { ok: true, state: this.bridge.getState(key) ?? clean };
+  }
+
+  #scheduleStateReread(key) {
+    for (const ms of [900, 2200]) {
+      const t = setTimeout(() => this.#rereadDeviceState(key), ms);
+      t.unref?.();
+    }
+  }
+
+  async #rereadDeviceState(key) {
+    const entry = this.devices.get(key);
+    if (!entry) return;
+    try {
+      const state = await entry.platform.getState(entry.device.id, entry.device);
+      this.bridge.reflectExternalChange(key, state);
+    } catch { /* transient; the periodic poll will catch up */ }
   }
 
   /**
