@@ -181,6 +181,7 @@ const AC_DEVICE = {
     capabilities: [
       { id: 'switch' }, { id: 'airConditionerMode' }, { id: 'thermostatCoolingSetpoint' },
       { id: 'temperatureMeasurement' }, { id: 'airConditionerFanMode' },
+      { id: 'samsungce.airConditionerLighting' },
     ],
   }],
 };
@@ -199,6 +200,7 @@ const AC_STATUS = {
         minimumSetpoint: { value: 16, unit: 'C' },
         maximumSetpoint: { value: 30, unit: 'C' },
       },
+      'samsungce.airConditionerLighting': { lighting: { value: 'on' } },
     },
   },
 };
@@ -216,11 +218,30 @@ test('normalizes an AC into type ac with modes and setpoint limits', async (t) =
   assert.equal(ac.features.ac.maxC, 30);
   assert.equal(ac.features.ac.unit, 'C');
 
+  assert.equal(ac.features.ac.panelLight, true); // detected the display-light capability
+
   const state = await platform.getState('st-ac-1', ac);
   assert.equal(state.power, true);
   assert.equal(state.mode, 'cool');
   assert.equal(state.currentC, 27);
   assert.equal(state.targetC, 24);
+  assert.equal(state.panelLight, true);
+});
+
+test('AC setState toggles the panel/display light', async (t) => {
+  const platform = new SmartThingsPlatform({ token: 'tok' });
+  let sentBody = null;
+  t.mock.method(globalThis, 'fetch', mockFetch({
+    'POST /v1/devices/st-ac-1/commands': (u, options) => { sentBody = JSON.parse(options.body); return {}; },
+  }));
+  const device = { features: { ac: { unit: 'C', panelLight: true } } };
+  await platform.setState('st-ac-1', { panelLight: false }, device);
+  assert.deepEqual(sentBody.commands, [{
+    component: 'main', capability: 'samsungce.airConditionerLighting',
+    command: 'setLightingLevel', arguments: ['off'],
+  }]);
+  await platform.setState('st-ac-1', { panelLight: true }, device);
+  assert.equal(sentBody.commands[0].arguments[0], 'on');
 });
 
 test('AC setState sends mode and setpoint commands', async (t) => {

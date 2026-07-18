@@ -215,6 +215,8 @@ export class SmartThingsPlatform {
     let unit = 'C';
     let minC = 16;
     let maxC = 30;
+    // Samsung ACs expose the front-panel/display light as a separate capability.
+    const panelLight = this.#capabilities(device).has('samsungce.airConditionerLighting');
     try {
       const status = await this.#request(`/devices/${device.deviceId}/status`);
       const main = status.components?.main ?? {};
@@ -243,7 +245,7 @@ export class SmartThingsPlatform {
         brightness: false,
         colorTemp: null,
         color: false,
-        ac: { modes, minC, maxC, unit },
+        ac: { modes, minC, maxC, unit, panelLight },
       },
     };
   }
@@ -271,6 +273,8 @@ export class SmartThingsPlatform {
       if (current?.value != null) state.currentC = toC(current.value, current.unit ?? unit);
       const setpoint = main.thermostatCoolingSetpoint?.coolingSetpoint;
       if (setpoint?.value != null) state.targetC = toC(setpoint.value, setpoint.unit ?? unit);
+      const lighting = main['samsungce.airConditionerLighting']?.lighting;
+      if (lighting?.value != null) state.panelLight = lighting.value === 'on';
     }
     return state;
   }
@@ -303,6 +307,9 @@ export class SmartThingsPlatform {
     if (changes.targetC !== undefined) {
       const unit = device?.features?.ac?.unit ?? 'C';
       commands.push({ component: 'main', capability: 'thermostatCoolingSetpoint', command: 'setCoolingSetpoint', arguments: [fromC(changes.targetC, unit)] });
+    }
+    if (changes.panelLight !== undefined) {
+      commands.push({ component: 'main', capability: 'samsungce.airConditionerLighting', command: 'setLightingLevel', arguments: [changes.panelLight ? 'on' : 'off'] });
     }
     if (!commands.length) return;
     await this.#request(`/devices/${deviceId}/commands`, {

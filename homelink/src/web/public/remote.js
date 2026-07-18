@@ -90,6 +90,12 @@ function buildCard(d) {
         <div class="tempval"><div class="t"><span data-role="target">--</span>°</div><div class="cur">now <span data-role="current">--</span>°</div></div>
         <button data-role="temp-up">＋</button>
       </div>`;
+    if (d.features.ac.panelLight) {
+      controls += `<div class="ctl toggle-row">
+        <span class="lbl">Panel light</span>
+        <label class="switch"><input type="checkbox" data-role="panel-light"><span></span></label>
+      </div>`;
+    }
   } else {
     if (d.features.brightness) {
       controls += `<div class="ctl">
@@ -199,6 +205,11 @@ function wireCard(el, d) {
         } catch { toast('Could not set timer'); }
       });
     });
+  }
+
+  const panel = q('panel-light');
+  if (panel) {
+    panel.addEventListener('change', () => control(key, { panelLight: panel.checked }));
   }
 
   const down = q('temp-down'), up = q('temp-up');
@@ -324,6 +335,8 @@ function updateCard(el, d) {
   }
   if (q('target') && s.targetC !== undefined) q('target').textContent = Math.round(s.targetC);
   if (q('current') && s.currentC !== undefined) q('current').textContent = Math.round(s.currentC);
+  const panel = q('panel-light');
+  if (panel && s.panelLight !== undefined && panel !== active) panel.checked = !!s.panelLight;
 
   if (String(d.timerFiresAt || '') !== (el.dataset.firesAt || '')) setTimer(el, d.timerFiresAt);
 }

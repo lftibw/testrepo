@@ -333,6 +333,7 @@ export class HomeKitBridge {
         mode: r.state.mode,
         currentC: r.state.currentC,
         targetC: r.state.targetC,
+        panelLight: r.state.panelLight,
       },
     }));
   }
