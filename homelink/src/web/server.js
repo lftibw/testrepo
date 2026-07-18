@@ -133,6 +133,10 @@ export function createWebServer(app /* HomeLinkApp */) {
     res.json(app.setDeviceTimer(req.params.key, minutes));
   }));
 
+  web.get('/api/devices/:key/debug', wrap(async (req, res) => {
+    res.json(await app.deviceDebug(req.params.key));
+  }));
+
   web.get('/remote', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'remote.html'));
   });

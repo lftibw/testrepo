@@ -294,6 +294,24 @@ export class HomeLinkApp {
     return { firesAt };
   }
 
+  /** Diagnostics: normalized features plus (for SmartThings) the raw status. */
+  async deviceDebug(key) {
+    const entry = this.devices.get(key);
+    if (!entry) throw new Error('Unknown device');
+    const out = {
+      key,
+      platform: entry.platform.name,
+      account: entry.platform.accountLabel ?? null,
+      name: entry.device.name,
+      type: entry.device.type,
+      features: entry.device.features,
+    };
+    if (typeof entry.platform.rawStatus === 'function') {
+      out.raw = await entry.platform.rawStatus(entry.device.id).catch((e) => ({ error: e.message }));
+    }
+    return out;
+  }
+
   setDeviceExcluded(key, excluded) {
     const set = new Set(this.config.excludedDevices ?? []);
     if (excluded) set.add(key);

@@ -97,6 +97,7 @@ export class SmartThingsPlatform {
     this.auth = auth;
     this.onTokenUpdate = onTokenUpdate;
     this.refreshing = null;
+    this.acLogged = new Set(); // deviceIds whose AC capabilities we've logged once
   }
 
   get usesOAuth() {
@@ -148,6 +149,11 @@ export class SmartThingsPlatform {
   async testConnection() {
     const data = await this.#request('/devices?max=1');
     return { ok: true, sample: data.items?.length ?? 0 };
+  }
+
+  /** Raw SmartThings status for a device (diagnostics). */
+  async rawStatus(deviceId) {
+    return this.#request(`/devices/${deviceId}/status`);
   }
 
   async listDevices() {
@@ -211,17 +217,30 @@ export class SmartThingsPlatform {
    * reports °C or °F — all of which shape the HomeKit HeaterCooler service.
    */
   async #normalizeAc(device) {
+    const caps = this.#capabilities(device);
     let modes = ['auto', 'cool', 'heat'];
     let unit = 'C';
     let minC = 16;
     let maxC = 30;
-    // Samsung ACs expose the front-panel/display light as a separate capability.
-    const panelLight = this.#capabilities(device).has('samsungce.airConditionerLighting');
-    // "Optional" modes: Max/turbo (speed), WindFree, Sleep, Quiet, … (single-select).
+    // These are declared in the device's capability list (reliable, no status read).
+    const panelLight = caps.has('samsungce.airConditionerLighting');
+    const hasOptional = caps.has('custom.airConditionerOptionalMode');
+    // The list of supported optional modes (Max/turbo=speed, WindFree, …) only
+    // comes from the status read — so retry it, since a single transient failure
+    // would otherwise fall back to defaults and hide these controls.
     let optionalModes = [];
-    try {
-      const status = await this.#request(`/devices/${device.deviceId}/status`);
-      const main = status.components?.main ?? {};
+    const name = device.label || device.name || 'Air Conditioner';
+    let main = null;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3 && !main; attempt++) {
+      try {
+        const status = await this.#request(`/devices/${device.deviceId}/status`);
+        main = status.components?.main ?? {};
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (main) {
       unit = main.temperatureMeasurement?.temperature?.unit ?? 'C';
       const supported = main.airConditionerMode?.supportedAcModes?.value;
       if (Array.isArray(supported) && supported.length) modes = supported;
@@ -234,8 +253,16 @@ export class SmartThingsPlatform {
       }
       const optSupported = main['custom.airConditionerOptionalMode']?.supportedAcOptionalMode?.value;
       if (Array.isArray(optSupported)) optionalModes = optSupported.filter(Boolean);
-    } catch {
-      // fall back to sensible AC defaults if the status read fails
+    } else {
+      console.warn(`[homelink] AC "${name}" status read failed (using defaults): ${lastErr?.message}`);
+    }
+    // One-time diagnostic per AC so it's clear what each unit actually reports.
+    if (!this.acLogged.has(device.deviceId)) {
+      this.acLogged.add(device.deviceId);
+      const note = hasOptional && !optionalModes.length
+        ? ' — has optional-mode capability but no supported list was returned'
+        : (!hasOptional ? ' — no optional-mode (Max) capability on this AC' : '');
+      console.log(`[homelink] AC "${name}": modes=[${modes}] optional=[${optionalModes}] panelLight=${panelLight}${note}`);
     }
     return {
       id: device.deviceId,
