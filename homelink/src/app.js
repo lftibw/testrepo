@@ -5,6 +5,7 @@
 
 import crypto from 'node:crypto';
 import { saveConfig } from './config.js';
+import { computeEnergy } from './energy.js';
 import {
   SmartThingsPlatform,
   buildAuthorizeUrl,
@@ -368,7 +369,22 @@ export class HomeLinkApp {
       },
       state: bridged.get(key)?.state ?? {},
       timerFiresAt: this.timers.get(key)?.firesAt ?? null,
+      energy: computeEnergy(device, bridged.get(key)?.state ?? {}, this.config.energy),
     }));
+  }
+
+  energyRate() {
+    return this.config.energy ?? { currency: '', pricePerKwh: 0 };
+  }
+
+  setEnergyRate({ currency, pricePerKwh }) {
+    const price = Number(pricePerKwh);
+    this.config.energy = {
+      currency: typeof currency === 'string' && currency.trim() ? currency.trim().slice(0, 4) : this.config.energy?.currency ?? '',
+      pricePerKwh: Number.isFinite(price) && price >= 0 ? price : this.config.energy?.pricePerKwh ?? 0,
+    };
+    saveConfig(this.config);
+    return this.config.energy;
   }
 
   status() {

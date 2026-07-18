@@ -295,6 +295,9 @@ export class SmartThingsPlatform {
       state.hue = (Number(main.colorControl.hue.value) || 0) * 3.6;
       state.saturation = Number(main.colorControl.saturation?.value) || 0;
     }
+    // Real energy metering, when the device reports it.
+    if (main.powerMeter?.power?.value != null) state.watts = Number(main.powerMeter.power.value) || 0;
+    if (main.energyMeter?.energy?.value != null) state.energyKwh = Number(main.energyMeter.energy.value) || 0;
     if (device?.features?.ac) {
       const unit = device.features.ac.unit;
       if (main.airConditionerMode?.airConditionerMode) {

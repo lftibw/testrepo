@@ -29,6 +29,7 @@ const DEFAULTS = () => ({
     port: 51826,
   },
   webPort: 8580,
+  energy: { currency: '₹', pricePerKwh: 8 }, // electricity tariff for cost estimates
   smartthings: null, // legacy single account; migrated to smartthingsAccounts on load
   smartthingsAccounts: [], // [{ id, label, token } | { id, label, oauth }]
   tuya: null, // { accessId, accessSecret, region }

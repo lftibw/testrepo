@@ -102,7 +102,11 @@ export function createWebServer(app /* HomeLinkApp */) {
   }));
 
   web.get('/api/devices', wrap(async (req, res) => {
-    res.json({ devices: app.allDevices() });
+    res.json({ devices: app.allDevices(), energyRate: app.energyRate() });
+  }));
+
+  web.post('/api/settings/energy', wrap(async (req, res) => {
+    res.json({ ok: true, energyRate: app.setEnergyRate(req.body ?? {}) });
   }));
 
   web.post('/api/devices/refresh', wrap(async (req, res) => {

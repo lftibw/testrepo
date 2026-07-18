@@ -69,6 +69,15 @@
   .nm { font-weight: 650; font-size: 16.5px; letter-spacing: -.01em; }
   .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .sub .acct { color: var(--accent); }
+  .energy { font-size: 12px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .energy:empty { display: none; }
+  .dev.off .ctrls { pointer-events: none; opacity: .5; filter: grayscale(.35); transition: opacity .3s, filter .3s; }
+  .rate { font-size: 12px; color: var(--muted); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
+  .rate input {
+    width: 38px; padding: 2px 6px; font-size: 12px; text-align: center; color: var(--text);
+    background: var(--glass-2); border: 1px solid var(--stroke-soft); border-radius: 7px; outline: none;
+  }
+  .rate #rate-cur { width: 30px; }
   .badge {
     display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
     border: 1px solid var(--stroke-soft); color: var(--muted);
@@ -198,7 +207,10 @@
 </header>
 <main>
   <div class="bar">
-    <div class="summary" id="summary">Loading…</div>
+    <div>
+      <div class="summary" id="summary">Loading…</div>
+      <div class="rate">⚡ Rate <input id="rate-cur" maxlength="4" aria-label="currency symbol"><input id="rate-val" type="number" min="0" step="0.1" aria-label="price per kWh"> / kWh</div>
+    </div>
     <div class="actions">
       <button id="all-lights-on">💡 Lights on</button>
       <button id="all-lights-off">🌙 Lights off</button>

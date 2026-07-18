@@ -166,6 +166,7 @@ function buildCard(d) {
       <div>
         <div class="nm">${escapeHtml(d.name)}</div>
         <div class="sub">${escapeHtml(d.platformLabel)}${acct}${online}</div>
+        <div class="energy" data-role="energy"></div>
       </div>
       <button class="pow" data-role="power" title="Power">⏻</button>
     </div>
@@ -274,9 +275,30 @@ function wireCard(el, d) {
 
 function setPower(el, on) {
   el.classList.toggle('poweron', on);
-  el.classList.toggle('off', !on);
+  el.classList.toggle('off', !on); // .off dims + locks the controls (CSS), power stays live
   const p = el.querySelector('[data-role="power"]');
   if (p) p.classList.toggle('on', on);
+}
+
+function fmtMoney(v, cur) {
+  if (v == null) return '';
+  return `${cur}${v < 1 ? v.toFixed(2) : v.toFixed(v < 10 ? 1 : 0)}`;
+}
+
+function renderEnergy(el, d) {
+  const e = d.energy || {};
+  const box = el.querySelector('[data-role="energy"]');
+  if (!box) return;
+  if (d.state.power === false) { box.textContent = ''; return; }
+  if (e.watts == null) { box.textContent = ''; return; } // unknown load (unmetered plug/switch)
+  const est = e.estimated ? '~' : '';
+  const parts = [`⚡ ${est}${e.watts} W`];
+  if (e.costPerHour != null && e.costPerHour > 0) parts.push(`${fmtMoney(e.costPerHour, e.currency)}/hr`);
+  if (e.kwh != null) parts.push(`${e.kwh} kWh`);
+  box.textContent = parts.join(' · ');
+  box.title = e.estimated
+    ? `Estimated draw. ~${fmtMoney(e.costPerDay, e.currency)}/day if left on.`
+    : `Measured. ~${fmtMoney(e.costPerDay, e.currency)}/day at this draw.`;
 }
 
 function setTimer(el, firesAt) {
@@ -360,6 +382,7 @@ function updateCard(el, d) {
   const active = document.activeElement;
 
   if (s.power !== undefined) setPower(el, !!s.power);
+  renderEnergy(el, d);
 
   const bright = q('bright');
   if (bright && s.brightness !== undefined && bright !== active) {
@@ -394,13 +417,14 @@ function updateCard(el, d) {
 }
 
 async function load() {
-  let devices;
+  let devices, energyRate;
   try {
     const res = await fetch('/api/devices');
-    ({ devices } = await res.json());
+    ({ devices, energyRate } = await res.json());
   } catch {
     return;
   }
+  if (energyRate) renderRate(energyRate);
   lastDevices = devices;
   document.getElementById('filters').style.display = devices.length ? '' : 'none';
   if (!devices.length) {
@@ -427,6 +451,28 @@ async function load() {
   renderChrome(devices);
   applyFilter();
 }
+
+// Electricity-rate editor (don't clobber inputs while the user is typing).
+function renderRate(rate) {
+  const cur = document.getElementById('rate-cur');
+  const val = document.getElementById('rate-val');
+  if (document.activeElement !== cur) cur.value = rate.currency ?? '';
+  if (document.activeElement !== val) val.value = rate.pricePerKwh ?? 0;
+}
+async function saveRate() {
+  try {
+    await fetch('/api/settings/energy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        currency: document.getElementById('rate-cur').value,
+        pricePerKwh: document.getElementById('rate-val').value,
+      }),
+    });
+    await load();
+  } catch { toast('Could not save rate'); }
+}
+document.getElementById('rate-cur').addEventListener('change', saveRate);
+document.getElementById('rate-val').addEventListener('change', saveRate);
 
 document.getElementById('all-lights-on').addEventListener('click', () => scene(['light'], { power: true }, 'Lights on'));
 document.getElementById('all-lights-off').addEventListener('click', () => scene(['light'], { power: false }, 'Lights off'));

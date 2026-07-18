@@ -335,6 +335,8 @@ export class HomeKitBridge {
         targetC: r.state.targetC,
         panelLight: r.state.panelLight,
         optionalMode: r.state.optionalMode,
+        watts: r.state.watts,
+        energyKwh: r.state.energyKwh,
       },
     }));
   }
