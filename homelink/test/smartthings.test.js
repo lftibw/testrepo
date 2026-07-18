@@ -181,7 +181,7 @@ const AC_DEVICE = {
     capabilities: [
       { id: 'switch' }, { id: 'airConditionerMode' }, { id: 'thermostatCoolingSetpoint' },
       { id: 'temperatureMeasurement' }, { id: 'airConditionerFanMode' },
-      { id: 'samsungce.airConditionerLighting' },
+      { id: 'samsungce.airConditionerLighting' }, { id: 'custom.airConditionerOptionalMode' },
     ],
   }],
 };
@@ -201,6 +201,10 @@ const AC_STATUS = {
         maximumSetpoint: { value: 30, unit: 'C' },
       },
       'samsungce.airConditionerLighting': { lighting: { value: 'on' } },
+      'custom.airConditionerOptionalMode': {
+        acOptionalMode: { value: 'off' },
+        supportedAcOptionalMode: { value: ['off', 'speed', 'windFree', 'sleep'] },
+      },
     },
   },
 };
@@ -219,6 +223,7 @@ test('normalizes an AC into type ac with modes and setpoint limits', async (t) =
   assert.equal(ac.features.ac.unit, 'C');
 
   assert.equal(ac.features.ac.panelLight, true); // detected the display-light capability
+  assert.deepEqual(ac.features.ac.optionalModes, ['off', 'speed', 'windFree', 'sleep']); // Max = speed
 
   const state = await platform.getState('st-ac-1', ac);
   assert.equal(state.power, true);
@@ -226,6 +231,20 @@ test('normalizes an AC into type ac with modes and setpoint limits', async (t) =
   assert.equal(state.currentC, 27);
   assert.equal(state.targetC, 24);
   assert.equal(state.panelLight, true);
+  assert.equal(state.optionalMode, 'off');
+});
+
+test('AC setState sets the Max/optional mode', async (t) => {
+  const platform = new SmartThingsPlatform({ token: 'tok' });
+  let sentBody = null;
+  t.mock.method(globalThis, 'fetch', mockFetch({
+    'POST /v1/devices/st-ac-1/commands': (u, options) => { sentBody = JSON.parse(options.body); return {}; },
+  }));
+  await platform.setState('st-ac-1', { optionalMode: 'speed' }, { features: { ac: {} } });
+  assert.deepEqual(sentBody.commands, [{
+    component: 'main', capability: 'custom.airConditionerOptionalMode',
+    command: 'setAcOptionalMode', arguments: ['speed'],
+  }]);
 });
 
 test('AC setState toggles the panel/display light', async (t) => {

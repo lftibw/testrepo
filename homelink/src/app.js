@@ -245,7 +245,7 @@ export class HomeLinkApp {
   async controlDevice(key, changes) {
     const entry = this.devices.get(key);
     if (!entry) throw new Error('Unknown device');
-    const allowed = ['power', 'brightness', 'colorTempK', 'hue', 'saturation', 'mode', 'targetC', 'panelLight'];
+    const allowed = ['power', 'brightness', 'colorTempK', 'hue', 'saturation', 'mode', 'targetC', 'panelLight', 'optionalMode'];
     const clean = {};
     for (const k of allowed) if (changes[k] !== undefined) clean[k] = changes[k];
     if (!Object.keys(clean).length) throw new Error('No supported control values provided');
@@ -322,7 +322,10 @@ export class HomeLinkApp {
         colorTemp: !!device.features.colorTemp,
         color: device.features.color,
         ac: device.features.ac
-          ? { modes: device.features.ac.modes, minC: device.features.ac.minC, maxC: device.features.ac.maxC, panelLight: !!device.features.ac.panelLight }
+          ? {
+            modes: device.features.ac.modes, minC: device.features.ac.minC, maxC: device.features.ac.maxC,
+            panelLight: !!device.features.ac.panelLight, optionalModes: device.features.ac.optionalModes ?? [],
+          }
           : false,
       },
       state: bridged.get(key)?.state ?? {},

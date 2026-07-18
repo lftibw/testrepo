@@ -3,6 +3,14 @@ const toastEl = document.getElementById('toast');
 
 const AC_MODE_LABELS = { auto: 'Auto', cool: 'Cool', heat: 'Heat', dry: 'Dry', wind: 'Fan', fanOnly: 'Fan', fan: 'Fan' };
 
+// Samsung AC "optional" modes (custom.airConditionerOptionalMode); speed = Max/turbo.
+const AC_OPTIONAL_LABELS = {
+  off: 'Normal', speed: 'Max', windFree: 'WindFree', windFreeSleep: 'WindFree Sleep',
+  sleep: 'Sleep', quiet: 'Quiet', longWind: 'Long wind', smart: 'Smart', cool: 'Cool',
+  twoStep: '2-Step', comfort: 'Comfort', motionDirect: 'Motion', motionIndirect: 'Motion (indirect)',
+};
+const optLabel = (v) => AC_OPTIONAL_LABELS[v] || v.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+
 // hue/saturation presets for color bulbs
 const PRESET_COLORS = [
   { name: 'Warm', h: 30, s: 55 }, { name: 'White', h: 0, s: 0 }, { name: 'Red', h: 0, s: 100 },
@@ -90,6 +98,11 @@ function buildCard(d) {
         <div class="tempval"><div class="t"><span data-role="target">--</span>°</div><div class="cur">now <span data-role="current">--</span>°</div></div>
         <button data-role="temp-up">＋</button>
       </div>`;
+    const opts = d.features.ac.optionalModes || [];
+    if (opts.length) {
+      const btns = opts.map((m) => `<button data-opt="${escapeHtml(m)}">${escapeHtml(optLabel(m))}</button>`).join('');
+      controls += `<div class="ctl"><div class="lbl">Extra mode</div><div class="modes" data-role="opts">${btns}</div></div>`;
+    }
     if (d.features.ac.panelLight) {
       controls += `<div class="ctl toggle-row">
         <span class="lbl">Panel light</span>
@@ -207,6 +220,16 @@ function wireCard(el, d) {
     });
   }
 
+  const opts = q('opts');
+  if (opts) {
+    opts.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        opts.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+        control(key, { optionalMode: b.dataset.opt, power: true });
+        setPower(el, true);
+      });
+    });
+  }
   const panel = q('panel-light');
   if (panel) {
     panel.addEventListener('change', () => control(key, { panelLight: panel.checked }));
@@ -335,6 +358,10 @@ function updateCard(el, d) {
   }
   if (q('target') && s.targetC !== undefined) q('target').textContent = Math.round(s.targetC);
   if (q('current') && s.currentC !== undefined) q('current').textContent = Math.round(s.currentC);
+  const opts = q('opts');
+  if (opts && s.optionalMode) {
+    opts.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.opt === s.optionalMode));
+  }
   const panel = q('panel-light');
   if (panel && s.panelLight !== undefined && panel !== active) panel.checked = !!s.panelLight;
 

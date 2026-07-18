@@ -217,6 +217,8 @@ export class SmartThingsPlatform {
     let maxC = 30;
     // Samsung ACs expose the front-panel/display light as a separate capability.
     const panelLight = this.#capabilities(device).has('samsungce.airConditionerLighting');
+    // "Optional" modes: Max/turbo (speed), WindFree, Sleep, Quiet, … (single-select).
+    let optionalModes = [];
     try {
       const status = await this.#request(`/devices/${device.deviceId}/status`);
       const main = status.components?.main ?? {};
@@ -230,6 +232,8 @@ export class SmartThingsPlatform {
       if (setpointCtl?.maximumSetpoint?.value != null) {
         maxC = Math.round(toC(setpointCtl.maximumSetpoint.value, unit));
       }
+      const optSupported = main['custom.airConditionerOptionalMode']?.supportedAcOptionalMode?.value;
+      if (Array.isArray(optSupported)) optionalModes = optSupported.filter(Boolean);
     } catch {
       // fall back to sensible AC defaults if the status read fails
     }
@@ -245,7 +249,7 @@ export class SmartThingsPlatform {
         brightness: false,
         colorTemp: null,
         color: false,
-        ac: { modes, minC, maxC, unit, panelLight },
+        ac: { modes, minC, maxC, unit, panelLight, optionalModes },
       },
     };
   }
@@ -275,6 +279,8 @@ export class SmartThingsPlatform {
       if (setpoint?.value != null) state.targetC = toC(setpoint.value, setpoint.unit ?? unit);
       const lighting = main['samsungce.airConditionerLighting']?.lighting;
       if (lighting?.value != null) state.panelLight = lighting.value === 'on';
+      const opt = main['custom.airConditionerOptionalMode']?.acOptionalMode;
+      if (opt?.value != null) state.optionalMode = opt.value;
     }
     return state;
   }
@@ -310,6 +316,9 @@ export class SmartThingsPlatform {
     }
     if (changes.panelLight !== undefined) {
       commands.push({ component: 'main', capability: 'samsungce.airConditionerLighting', command: 'setLightingLevel', arguments: [changes.panelLight ? 'on' : 'off'] });
+    }
+    if (changes.optionalMode !== undefined) {
+      commands.push({ component: 'main', capability: 'custom.airConditionerOptionalMode', command: 'setAcOptionalMode', arguments: [changes.optionalMode] });
     }
     if (!commands.length) return;
     await this.#request(`/devices/${deviceId}/commands`, {
